@@ -394,13 +394,13 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
           }}
         />
 
-        <div className="relative z-10 max-w-md w-full mx-auto px-6 flex flex-col justify-center h-full">
+        <div className="relative z-10 max-w-md w-full mx-auto px-6 flex flex-col justify-center h-full pb-28 sm:pb-0">
           <motion.div
             initial={{ scale: 0.8 }}
             animate={{ scale: 1 }}
             className="mb-8"
           >
-            <div className="relative w-80 h-80 mx-auto group">
+            <div className="relative w-72 h-72 sm:w-80 sm:h-80 mx-auto group">
               <img
                 src={currentPost.albumArt}
                 alt={currentPost.songTitle}
@@ -459,7 +459,7 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
           </div>
         </div>
 
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-4 z-20">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex flex-row gap-3 z-20 sm:absolute sm:bottom-auto sm:left-auto sm:translate-x-0 sm:right-4 sm:top-1/2 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
           {(Object.keys(instrumentIcons) as InstrumentType[]).map((instrument) => {
             const Icon = instrumentIcons[instrument];
             const count = currentPost.reactions[instrument];
@@ -484,7 +484,7 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={() => onViewProfile(currentPost.userId)}
-            className="flex flex-col items-center gap-1 group mt-4"
+            className="flex flex-col items-center gap-1 group mt-0 sm:mt-4"
           >
             <div className="w-12 h-12 rounded-full bg-zinc-900/80 backdrop-blur-md flex items-center justify-center group-hover:bg-emerald-500/20 group-hover:scale-110 transition-all overflow-hidden">
               <img
@@ -500,7 +500,7 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={onShareSong}
-          className="fixed bottom-8 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 flex items-center justify-center z-20"
+          className="fixed bottom-8 right-6 sm:right-auto sm:bottom-8 sm:left-1/2 sm:-translate-x-1/2 w-14 h-14 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 flex items-center justify-center z-30"
           aria-label="Share Song"
         >
           <Plus className="w-6 h-6" />
