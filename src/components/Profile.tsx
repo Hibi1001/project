@@ -305,9 +305,9 @@ export default function Profile({ userId, onBack }: ProfileProps) {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ type: 'spring', duration: 0.3 }}
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-lg mx-4 max-h-[85vh] flex flex-col"
+              className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4"
             >
-              <div className="bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-800 overflow-hidden flex flex-col max-h-full">
+              <div className="w-full max-w-lg max-h-[85vh] bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-800 overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
                   <h2 className="text-lg font-semibold text-zinc-50">
                     Edit Profile
