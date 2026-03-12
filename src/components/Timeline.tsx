@@ -495,16 +495,6 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
             </div>
           </motion.button>
         </div>
-
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onShareSong}
-          className="fixed bottom-8 right-6 sm:right-auto sm:bottom-8 sm:left-1/2 sm:-translate-x-1/2 w-14 h-14 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 flex items-center justify-center z-30"
-          aria-label="Share Song"
-        >
-          <Plus className="w-6 h-6" />
-        </motion.button>
       </motion.div>
     </div>
   );
