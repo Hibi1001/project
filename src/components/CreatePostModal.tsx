@@ -1,15 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Search, Music2 } from 'lucide-react';
-import { createPost, searchiTunesSongs, type iTunesSongResult } from '../lib/api';
-
-const DEBOUNCE_MS = 350;
+import { X, Music2 } from 'lucide-react';
+import { createPost } from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 interface CreatePostModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmitSuccess: () => void;
   userId: string;
+  spotifyAccessToken: string | null;
 }
 
 export default function CreatePostModal({
@@ -17,55 +17,89 @@ export default function CreatePostModal({
   onClose,
   onSubmitSuccess,
   userId,
+  spotifyAccessToken,
 }: CreatePostModalProps) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<iTunesSongResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const [tracks, setTracks] = useState<
+    { id: string; name: string; artist: string; albumArt: string; previewUrl: string | null }[]
+  >([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const performSearch = useCallback(async (q: string) => {
-    if (!q.trim()) {
-      setResults([]);
-      return;
-    }
-    setIsSearching(true);
-    setError(null);
-    try {
-      const songs = await searchiTunesSongs(q);
-      setResults(songs);
-    } catch {
-      setResults([]);
-      setError('検索に失敗しました');
-    } finally {
-      setIsSearching(false);
-    }
-  }, []);
-
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      setIsSearching(false);
-      return;
-    }
-    const t = setTimeout(() => performSearch(query), DEBOUNCE_MS);
-    return () => clearTimeout(t);
-  }, [query, performSearch]);
+    const fetchRecentlyPlayed = async () => {
+      if (!isOpen || !spotifyAccessToken) {
+        setTracks([]);
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const res = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=20', {
+          headers: {
+            Authorization: `Bearer ${spotifyAccessToken}`,
+          },
+        });
+        if (!res.ok) {
+          setError('Failed to fetch recently played tracks from Spotify.');
+          setTracks([]);
+          setIsLoading(false);
+          return;
+        }
+        const json = await res.json();
+        const items = Array.isArray(json.items) ? json.items : [];
+        const mapped = items
+          .map((item: any) => {
+            const track = item?.track;
+            if (!track) return null;
+            const name = track.name as string | undefined;
+            const artist = (track.artists?.[0]?.name as string | undefined) ?? '';
+            const albumArt =
+              (track.album?.images?.[0]?.url as string | undefined) ??
+              'https://placehold.co/64x64?text=No+Art';
+            const previewUrl = (track.preview_url as string | null) ?? null;
+            const id = track.id as string | undefined;
+            if (!id || !name || !artist) return null;
+            return { id, name, artist, albumArt, previewUrl };
+          })
+          .filter(Boolean) as {
+          id: string;
+          name: string;
+          artist: string;
+          albumArt: string;
+          previewUrl: string | null;
+        }[];
+        setTracks(mapped);
+      } catch {
+        setError('Failed to fetch recently played tracks from Spotify.');
+        setTracks([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const handleSelectSong = async (song: iTunesSongResult) => {
-    if (isSubmitting || !song.previewUrl) return;
+    void fetchRecentlyPlayed();
+  }, [isOpen, spotifyAccessToken]);
+
+  const handleSelectTrack = async (track: {
+    id: string;
+    name: string;
+    artist: string;
+    albumArt: string;
+    previewUrl: string | null;
+  }) => {
+    if (isSubmitting) return;
     setError(null);
     setIsSubmitting(true);
     try {
       await createPost({
         userId,
-        trackName: song.trackName,
-        artistName: song.artistName,
-        previewUrl: song.previewUrl,
-        coverUrl: song.artworkUrl100,
+        trackName: track.name,
+        artistName: track.artist,
+        previewUrl: track.previewUrl,
+        coverUrl: track.albumArt,
       });
-      setQuery('');
-      setResults([]);
+      setTracks([]);
       onClose();
       onSubmitSuccess();
     } catch (err) {
@@ -78,8 +112,7 @@ export default function CreatePostModal({
   const handleClose = () => {
     if (!isSubmitting) {
       setError(null);
-      setQuery('');
-      setResults([]);
+      setTracks([]);
       onClose();
     }
   };
@@ -120,25 +153,29 @@ export default function CreatePostModal({
               </div>
 
               <div className="p-4 flex flex-col min-h-0">
-                <label
-                  htmlFor="song-search"
-                  className="block text-sm font-medium text-zinc-400 mb-2"
-                >
-                  Search Song / 楽曲検索
-                </label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
-                  <input
-                    id="song-search"
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="曲名やアーティストで検索..."
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-10 pr-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-                    disabled={isSubmitting}
-                    autoFocus
-                  />
-                </div>
+                {!spotifyAccessToken && (
+                  <>
+                    <p className="text-sm text-zinc-400 mb-3">
+                      Spotify と連携して最近再生した曲から選択できます。
+                    </p>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        // Triggers Spotify OAuth; Supabase will handle redirect and session update.
+                        await supabase.auth.signInWithOAuth({
+                          provider: 'spotify',
+                          options: {
+                            scopes: 'user-read-recently-played',
+                          },
+                        });
+                      }}
+                      className="w-full bg-emerald-500 text-white font-semibold py-2.5 px-4 rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition-all text-sm"
+                      disabled={isSubmitting}
+                    >
+                      Connect with Spotify
+                    </button>
+                  </>
+                )}
 
                 {error && (
                   <p className="mt-3 text-sm text-red-400 bg-red-400/10 rounded-lg px-3 py-2">
@@ -146,52 +183,54 @@ export default function CreatePostModal({
                   </p>
                 )}
 
-                <div className="mt-3 flex-1 min-h-0 flex flex-col">
-                  {isSearching && (
-                    <p className="text-sm text-zinc-500 py-4">検索中...</p>
-                  )}
-                  {!isSearching && query.trim() && results.length === 0 && (
-                    <p className="text-sm text-zinc-500 py-4">
-                      結果がありません。別のキーワードで試してください。
-                    </p>
-                  )}
-                  {!isSearching && results.length > 0 && (
-                    <ul className="overflow-y-auto space-y-1 pr-1 -mr-1">
-                      <AnimatePresence mode="popLayout">
-                        {results.map((song, index) => (
-                          <motion.li
-                            key={`${song.trackName}-${song.artistName}-${index}`}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="list-none"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleSelectSong(song)}
-                              disabled={isSubmitting}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 border border-transparent hover:border-zinc-700 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                {spotifyAccessToken && (
+                  <div className="mt-3 flex-1 min-h-0 flex flex-col">
+                    {isLoading && (
+                      <p className="text-sm text-zinc-500 py-4">Spotify から取得中...</p>
+                    )}
+                    {!isLoading && tracks.length === 0 && (
+                      <p className="text-sm text-zinc-500 py-4">
+                        最近再生した曲が見つかりませんでした。
+                      </p>
+                    )}
+                    {!isLoading && tracks.length > 0 && (
+                      <ul className="overflow-y-auto space-y-1 pr-1 -mr-1">
+                        <AnimatePresence mode="popLayout">
+                          {tracks.map((track) => (
+                            <motion.li
+                              key={track.id}
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0 }}
+                              className="list-none"
                             >
-                              <img
-                                src={song.artworkUrl100}
-                                alt=""
-                                className="w-12 h-12 rounded-lg shrink-0 object-cover"
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-zinc-50 font-medium truncate">
-                                  {song.trackName}
-                                </p>
-                                <p className="text-zinc-400 text-sm truncate">
-                                  {song.artistName}
-                                </p>
-                              </div>
-                              <Music2 className="w-5 h-5 text-zinc-500 shrink-0" />
-                            </button>
-                          </motion.li>
-                        ))}
-                      </AnimatePresence>
-                    </ul>
-                  )}
+                              <button
+                                type="button"
+                                onClick={() => handleSelectTrack(track)}
+                                disabled={isSubmitting}
+                                className="w-full flex items-center gap-3 p-3 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 border border-transparent hover:border-zinc-700 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <img
+                                  src={track.albumArt}
+                                  alt=""
+                                  className="w-12 h-12 rounded-lg shrink-0 object-cover"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-zinc-50 font-medium truncate">
+                                    {track.name}
+                                  </p>
+                                  <p className="text-zinc-400 text-sm truncate">
+                                    {track.artist}
+                                  </p>
+                                </div>
+                                <Music2 className="w-5 h-5 text-zinc-500 shrink-0" />
+                              </button>
+                            </motion.li>
+                          ))}
+                        </AnimatePresence>
+                      </ul>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

@@ -143,6 +143,9 @@ function App() {
   }
 
   const userId = session?.user.id ?? null;
+  const spotifyAccessToken =
+    // Supabase OAuth sessions expose the provider access token on the session.
+    (session as any)?.provider_token ?? null;
 
   if (!authReady) {
     return <div className="min-h-screen bg-zinc-950 text-zinc-50" />;
@@ -188,6 +191,7 @@ function App() {
         onClose={() => setCreatePostModalOpen(false)}
         onSubmitSuccess={handleCreatePostSuccess}
         userId={userId}
+        spotifyAccessToken={spotifyAccessToken}
       />
     </div>
   );

@@ -145,7 +145,7 @@ export interface CreatePostParams {
   userId: string;
   trackName: string;
   artistName: string;
-  previewUrl: string;
+  previewUrl: string | null;
   coverUrl: string;
 }
 
@@ -156,7 +156,7 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
       user_id: params.userId,
       song_title: params.trackName.trim(),
       artist_name: params.artistName.trim(),
-      preview_url: params.previewUrl,
+      preview_url: params.previewUrl ?? '',
       cover_url: params.coverUrl,
     })
     .select()
