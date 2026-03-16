@@ -60,7 +60,9 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
   const [passcodeOk, setPasscodeOk] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('secret_passcode_ok_2026') === 'true';
+    const legacy = window.localStorage.getItem('secret_passcode_ok_2026') === 'true';
+    const current = window.localStorage.getItem('isPasscodeValid') === 'true';
+    return legacy || current;
   });
   const [hasPostedToday, setHasPostedToday] = useState(false);
   const [currentScreen, setCurrentScreen] = useState<Screen>('lock');
@@ -118,7 +120,9 @@ function App() {
   const handlePasscodeSuccess = () => {
     setPasscodeOk(true);
     if (typeof window !== 'undefined') {
+      // Store under both old and new keys for backward compatibility.
       window.localStorage.setItem('secret_passcode_ok_2026', 'true');
+      window.localStorage.setItem('isPasscodeValid', 'true');
     }
   };
 

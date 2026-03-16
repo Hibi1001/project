@@ -147,12 +147,29 @@ export default function Profile({ userId, onBack }: ProfileProps) {
             </button>
             <h1 className="text-xl font-bold text-zinc-50">プロフィール</h1>
             {isOwnProfile && (
-              <button
-                onClick={openEdit}
-                className="ml-auto px-4 py-2 rounded-full bg-zinc-800/60 hover:bg-zinc-800 text-zinc-200 text-sm font-semibold border border-zinc-700/60 transition-colors"
-              >
-                Edit Profile (編集)
-              </button>
+              <>
+                <button
+                  onClick={openEdit}
+                  className="ml-auto px-4 py-2 rounded-full bg-zinc-800/60 hover:bg-zinc-800 text-zinc-200 text-sm font-semibold border border-zinc-700/60 transition-colors"
+                >
+                  Edit Profile (編集)
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // Clears local passcode + Supabase session so the user can fully reset access.
+                    if (typeof window !== 'undefined') {
+                      window.localStorage.removeItem('secret_passcode_ok_2026');
+                      window.localStorage.removeItem('isPasscodeValid');
+                    }
+                    await supabase.auth.signOut();
+                    window.location.reload();
+                  }}
+                  className="ml-2 text-xs text-zinc-500 hover:text-zinc-300 underline-offset-2 hover:underline"
+                >
+                  Sign out / Reset
+                </button>
+              </>
             )}
           </div>
         </div>
