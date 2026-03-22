@@ -191,6 +191,65 @@ export async function fetchPostsByUserId(userId: string): Promise<Post[]> {
   );
 }
 
+/** 12 hours between shares per user (based on `posts.created_at`). */
+export const SHARE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
+/** Latest `posts.created_at` ISO string for this user, or null if no posts. */
+export async function fetchLatestPostCreatedAtForUser(
+  userId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('posts')
+    .select('created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching latest post time', error);
+    return null;
+  }
+  if (!data) return null;
+  return (data as { created_at: string }).created_at ?? null;
+}
+
+export function getShareCooldownFromLatestPost(
+  latestCreatedAtIso: string | null,
+  nowMs: number = Date.now(),
+): {
+  blocked: boolean;
+  hoursRemaining: number;
+  minutesRemaining: number;
+} {
+  if (!latestCreatedAtIso) {
+    return { blocked: false, hoursRemaining: 0, minutesRemaining: 0 };
+  }
+  const last = new Date(latestCreatedAtIso).getTime();
+  if (Number.isNaN(last)) {
+    return { blocked: false, hoursRemaining: 0, minutesRemaining: 0 };
+  }
+  const eligibleAt = last + SHARE_COOLDOWN_MS;
+  if (nowMs >= eligibleAt) {
+    return { blocked: false, hoursRemaining: 0, minutesRemaining: 0 };
+  }
+  const msLeft = eligibleAt - nowMs;
+  const hoursRemaining = Math.floor(msLeft / (60 * 60 * 1000));
+  const minutesRemaining = Math.floor(
+    (msLeft % (60 * 60 * 1000)) / (60 * 1000),
+  );
+  return { blocked: true, hoursRemaining, minutesRemaining };
+}
+
+export function formatShareCooldownJa(info: {
+  blocked: boolean;
+  hoursRemaining: number;
+  minutesRemaining: number;
+}): string {
+  if (!info.blocked) return '';
+  return `次のシェアまであと ${info.hoursRemaining}時間${info.minutesRemaining}分`;
+}
+
 export interface CreatePostParams {
   userId: string;
   trackName: string;

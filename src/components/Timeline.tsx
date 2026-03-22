@@ -11,9 +11,17 @@ interface TimelineProps {
   onViewProfile: (profileSlug: string) => void;
   onShareSong: () => void;
   timelineRefreshTrigger?: number;
+  shareSongDisabled?: boolean;
+  shareCooldownText?: string;
 }
 
-export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTrigger = 0 }: TimelineProps) {
+export default function Timeline({
+  onViewProfile,
+  onShareSong,
+  timelineRefreshTrigger = 0,
+  shareSongDisabled = false,
+  shareCooldownText = '',
+}: TimelineProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -303,11 +311,21 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
       >
         <div className="text-zinc-400 text-sm">Loading timeline...</div>
         <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onShareSong}
-          className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 flex items-center justify-center z-20"
-          aria-label="Share Song"
+          whileHover={shareSongDisabled ? {} : { scale: 1.05 }}
+          whileTap={shareSongDisabled ? {} : { scale: 0.95 }}
+          onClick={shareSongDisabled ? undefined : onShareSong}
+          disabled={shareSongDisabled}
+          title={
+            shareSongDisabled && shareCooldownText
+              ? shareCooldownText
+              : undefined
+          }
+          className={`fixed bottom-8 right-8 w-14 h-14 rounded-full text-white shadow-lg flex items-center justify-center z-20 ${
+            shareSongDisabled
+              ? 'bg-zinc-700 cursor-not-allowed opacity-50'
+              : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
+          }`}
+          aria-label="曲をシェア"
         >
           <Plus className="w-6 h-6" />
         </motion.button>
@@ -321,15 +339,30 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
         ref={containerRef}
         className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
       >
-        <div className="text-zinc-400 text-sm text-center">
+        <div className="text-zinc-400 text-sm text-center max-w-xs">
           No posts yet. Share your first track!
+          {shareSongDisabled && shareCooldownText ? (
+            <span className="block mt-3 text-xs text-amber-400/90">
+              {shareCooldownText}
+            </span>
+          ) : null}
         </div>
         <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onShareSong}
-          className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 flex items-center justify-center z-20"
-          aria-label="Share Song"
+          whileHover={shareSongDisabled ? {} : { scale: 1.05 }}
+          whileTap={shareSongDisabled ? {} : { scale: 0.95 }}
+          onClick={shareSongDisabled ? undefined : onShareSong}
+          disabled={shareSongDisabled}
+          title={
+            shareSongDisabled && shareCooldownText
+              ? shareCooldownText
+              : undefined
+          }
+          className={`fixed bottom-8 right-8 w-14 h-14 rounded-full text-white shadow-lg flex items-center justify-center z-20 ${
+            shareSongDisabled
+              ? 'bg-zinc-700 cursor-not-allowed opacity-50'
+              : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
+          }`}
+          aria-label="曲をシェア"
         >
           <Plus className="w-6 h-6" />
         </motion.button>

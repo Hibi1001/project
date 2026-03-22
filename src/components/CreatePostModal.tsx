@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Music2 } from 'lucide-react';
-import { createPost } from '../lib/api';
+import {
+  createPost,
+  fetchLatestPostCreatedAtForUser,
+  formatShareCooldownJa,
+  getShareCooldownFromLatestPost,
+} from '../lib/api';
 import { getAuthRedirectBaseUrl, supabase } from '../lib/supabase';
 
 interface CreatePostModalProps {
@@ -10,6 +15,8 @@ interface CreatePostModalProps {
   onSubmitSuccess: () => void;
   userId: string;
   spotifyAccessToken: string | null;
+  shareSongBlocked: boolean;
+  shareCooldownText: string;
 }
 
 export default function CreatePostModal({
@@ -18,6 +25,8 @@ export default function CreatePostModal({
   onSubmitSuccess,
   userId,
   spotifyAccessToken,
+  shareSongBlocked,
+  shareCooldownText,
 }: CreatePostModalProps) {
   const [tracks, setTracks] = useState<
     { id: string; name: string; artist: string; albumArt: string; previewUrl: string | null }[]
@@ -92,6 +101,14 @@ export default function CreatePostModal({
     setError(null);
     setIsSubmitting(true);
     try {
+      const latestIso = await fetchLatestPostCreatedAtForUser(userId);
+      const cd = getShareCooldownFromLatestPost(latestIso, Date.now());
+      if (cd.blocked) {
+        setError(formatShareCooldownJa(cd));
+        setIsSubmitting(false);
+        return;
+      }
+
       await createPost({
         userId,
         trackName: track.name,
@@ -153,6 +170,20 @@ export default function CreatePostModal({
               </div>
 
               <div className="p-4 flex flex-col min-h-0">
+                {shareSongBlocked && shareCooldownText ? (
+                  <div className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 shrink-0">
+                    <p className="text-xs font-semibold text-amber-200/95 mb-1">
+                      12時間に1回までシェアできます
+                    </p>
+                    <p className="text-sm text-amber-100/90 leading-snug">
+                      最後の投稿時刻（データベースの記録）から12時間が経つまで、新しい曲を選べません。
+                    </p>
+                    <p className="text-sm text-amber-300 font-medium mt-2 tabular-nums">
+                      {shareCooldownText}
+                    </p>
+                  </div>
+                ) : null}
+
                 {!spotifyAccessToken && (
                   <>
                     <p className="text-sm text-zinc-400 mb-3">
@@ -208,7 +239,7 @@ export default function CreatePostModal({
                               <button
                                 type="button"
                                 onClick={() => handleSelectTrack(track)}
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || shareSongBlocked}
                                 className="w-full flex items-center gap-3 p-3 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 border border-transparent hover:border-zinc-700 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <img

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import LockScreen from './components/LockScreen';
 import Timeline from './components/Timeline';
@@ -6,7 +6,12 @@ import Profile from './components/Profile';
 import CreatePostModal from './components/CreatePostModal';
 import Login from './components/Login';
 import { supabase } from './lib/supabase';
-import { isProfileUuid } from './lib/api';
+import {
+  fetchLatestPostCreatedAtForUser,
+  formatShareCooldownJa,
+  getShareCooldownFromLatestPost,
+  isProfileUuid,
+} from './lib/api';
 import type { Session } from '@supabase/supabase-js';
 
 type Screen = 'lock' | 'timeline' | 'profile';
@@ -89,6 +94,10 @@ function App() {
   );
   const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
+  const [latestPostCreatedAt, setLatestPostCreatedAt] = useState<string | null>(
+    null,
+  );
+  const [cooldownTick, setCooldownTick] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -147,11 +156,45 @@ function App() {
     setCurrentScreen('timeline');
   };
 
-  const handleCreatePostSuccess = () => {
+  const refreshLatestPostTime = useCallback(async (uid: string) => {
+    const iso = await fetchLatestPostCreatedAtForUser(uid);
+    setLatestPostCreatedAt(iso);
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setCooldownTick((n) => n + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid || !passcodeOk) return;
+    void refreshLatestPostTime(uid);
+  }, [session?.user?.id, passcodeOk, refreshLatestPostTime]);
+
+  useEffect(() => {
+    if (!createPostModalOpen) return;
+    const uid = session?.user?.id;
+    if (!uid) return;
+    void refreshLatestPostTime(uid);
+  }, [createPostModalOpen, session?.user?.id, refreshLatestPostTime]);
+
+  const shareCooldown = useMemo(
+    () => getShareCooldownFromLatestPost(latestPostCreatedAt, Date.now()),
+    [latestPostCreatedAt, cooldownTick],
+  );
+  const shareSongBlocked = shareCooldown.blocked;
+  const shareCooldownLabelJa = formatShareCooldownJa(shareCooldown);
+
+  const handleCreatePostSuccess = useCallback(() => {
     setCreatePostModalOpen(false);
     setTimelineRefreshTrigger((t) => t + 1);
     setCurrentScreen('timeline');
-  };
+    const uid = session?.user?.id;
+    if (uid) void refreshLatestPostTime(uid);
+  }, [session?.user?.id, refreshLatestPostTime]);
 
   const handleViewProfile = (profileSlug: string) => {
     const slug = profileSlug.trim();
@@ -230,6 +273,9 @@ function App() {
             key="lock"
             onUnlock={handleUnlock}
             onShareSong={() => setCreatePostModalOpen(true)}
+            shareSongDisabled={shareSongBlocked}
+            shareCooldownText={shareCooldownLabelJa}
+            disableMainCtaWhenShareCooldown={false}
           />
         )}
         {currentScreen === 'timeline' && (
@@ -238,6 +284,8 @@ function App() {
             onViewProfile={handleViewProfile}
             onShareSong={() => setCreatePostModalOpen(true)}
             timelineRefreshTrigger={timelineRefreshTrigger}
+            shareSongDisabled={shareSongBlocked}
+            shareCooldownText={shareCooldownLabelJa}
           />
         )}
         {currentScreen === 'profile' && selectedProfileSlug && (
@@ -256,6 +304,8 @@ function App() {
         onSubmitSuccess={handleCreatePostSuccess}
         userId={userId}
         spotifyAccessToken={spotifyAccessToken}
+        shareSongBlocked={shareSongBlocked}
+        shareCooldownText={shareCooldownLabelJa}
       />
     </div>
   );
