@@ -9,7 +9,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Cropper, { type Area } from 'react-easy-crop';
 import {
   fetchUserById,
@@ -19,6 +19,8 @@ import {
 } from '../lib/api';
 import type { User, Post } from '../types';
 import { supabase } from '../lib/supabase';
+
+const SHARED_SONGS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -110,6 +112,20 @@ export default function Profile({
   const [lineUrl, setLineUrl] = useState('');
   const [displayIdInput, setDisplayIdInput] = useState('');
   const persistedSnsRef = useRef({ instagram: '', line: '' });
+  /** `posts.created_at` (ISO) keyed by post id — used only for the 7-day shared songs filter. */
+  const [postCreatedAtById, setPostCreatedAtById] = useState<
+    Record<string, string>
+  >({});
+
+  const recentSharedPosts = useMemo(() => {
+    const cutoff = Date.now() - SHARED_SONGS_WINDOW_MS;
+    return userPosts.filter((post) => {
+      const createdAt = postCreatedAtById[post.id];
+      if (!createdAt) return false;
+      const t = new Date(createdAt).getTime();
+      return !Number.isNaN(t) && t >= cutoff;
+    });
+  }, [userPosts, postCreatedAtById]);
 
   useEffect(() => {
     const load = async () => {
@@ -118,6 +134,7 @@ export default function Profile({
       if (!userData) {
         setUser(null);
         setUserPosts([]);
+        setPostCreatedAtById({});
         setIsLoading(false);
         return;
       }
@@ -125,6 +142,19 @@ export default function Profile({
       const postsData = await fetchPostsByUserId(uid);
       setUser(userData);
       setUserPosts(postsData);
+
+      const { data: postTsRows } = await supabase
+        .from('posts')
+        .select('id, created_at')
+        .eq('user_id', uid);
+      const tsMap: Record<string, string> = {};
+      (postTsRows as { id: string; created_at: string }[] | null)?.forEach(
+        (row) => {
+          if (row.id && row.created_at) tsMap[row.id] = row.created_at;
+        },
+      );
+      setPostCreatedAtById(tsMap);
+
       const { data: snsRow } = await supabase
         .from('users')
         .select('instagram_url, line_url')
@@ -613,11 +643,21 @@ export default function Profile({
           </div>
 
           <div>
-            <h3 className="text-lg font-bold text-zinc-50 mb-4">
-              過去にシェアした曲
-            </h3>
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <h3 className="text-lg font-bold text-zinc-50">
+                過去にシェアした曲
+              </h3>
+              <span className="text-xs font-medium text-zinc-500 bg-zinc-800/80 border border-zinc-700/60 px-2 py-0.5 rounded-full">
+                直近7日間
+              </span>
+            </div>
+            {recentSharedPosts.length === 0 ? (
+              <p className="text-sm text-zinc-500/90 mb-3">
+                直近1週間のシェアはありません
+              </p>
+            ) : null}
             <div className="grid grid-cols-2 gap-4">
-              {userPosts.map((post) => (
+              {recentSharedPosts.map((post) => (
                 <motion.div
                   key={post.id}
                   whileHover={{ scale: 1.05 }}
