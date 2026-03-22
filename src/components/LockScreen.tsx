@@ -10,8 +10,8 @@ interface LockScreenProps {
   /** e.g. 「次のシェアまであと ○時間○分」 */
   shareCooldownText?: string;
   /**
-   * Timeline only: when set and `shareSongDisabled`, the main CTA becomes
-   * 「タイムラインを見る」 with subtle styling instead of opening share.
+   * Optional override for the main CTA when `shareSongDisabled` (e.g. Timeline bypass).
+   * If omitted, `onUnlock` is used (e.g. App lock → `handleUnlock`).
    */
   onViewTimelineWhenCooldown?: () => void;
 }
@@ -23,13 +23,10 @@ export default function LockScreen({
   shareCooldownText = '',
   onViewTimelineWhenCooldown,
 }: LockScreenProps) {
-  const useCooldownTimelineMain =
-    Boolean(shareSongDisabled && onViewTimelineWhenCooldown);
-
-  const showTopCooldownNotice =
-    shareSongDisabled &&
-    shareCooldownText &&
-    !useCooldownTimelineMain;
+  /** 12h cooldown always drives the zinc 「タイムラインを見る」 main button. */
+  const showCooldownMain = shareSongDisabled;
+  const onCooldownMainClick =
+    onViewTimelineWhenCooldown ?? onUnlock;
 
   return (
     <div className="fixed inset-0 bg-zinc-950 flex items-center justify-center overflow-hidden">
@@ -77,23 +74,15 @@ export default function LockScreen({
           仲間とシェアしてタイムラインをアンロック
         </p>
 
-        {showTopCooldownNotice ? (
-          <div className="mb-6 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-left">
-            <p className="text-xs font-semibold text-amber-200/95 mb-1">
-              シェアの間隔制限（12時間）
-            </p>
-            <p className="text-sm text-amber-100/90 leading-snug">
-              直近の投稿から12時間経過するまで、新しい曲をシェアできません。
-            </p>
-            <p className="text-sm text-amber-300 font-medium mt-2 tabular-nums">
-              {shareCooldownText}
-            </p>
-          </div>
+        {showCooldownMain ? (
+          <p className="text-xs text-zinc-500 mb-4 text-left leading-relaxed">
+            シェアは12時間に1回までです。次にシェアできるまでのあいだ、タイムラインだけ閲覧できます。
+          </p>
         ) : null}
 
         <div className="w-full">
           <AnimatePresence mode="wait" initial={false}>
-            {useCooldownTimelineMain ? (
+            {showCooldownMain ? (
               <motion.div
                 key="timeline-view"
                 layout
@@ -108,7 +97,7 @@ export default function LockScreen({
                   layout
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={onViewTimelineWhenCooldown}
+                  onClick={() => onCooldownMainClick()}
                   className="w-full rounded-full border border-zinc-600/80 bg-zinc-800/40 backdrop-blur-md text-zinc-100 font-semibold py-4 px-8 shadow-inner shadow-black/20 hover:bg-zinc-800/60 hover:border-zinc-500/70 transition-colors"
                 >
                   <span className="block text-base leading-snug">
@@ -171,9 +160,7 @@ export default function LockScreen({
 
         <p className="text-zinc-600 text-xs mt-6">
           {shareSongDisabled
-            ? useCooldownTimelineMain
-              ? 'シェアのクールダウン中です（上のボタンでタイムラインのみ閲覧できます）'
-              : 'クールダウン中は上記の時刻までシェアできません'
+            ? 'シェアのクールダウン中です（上のボタンでタイムラインを開けます）'
             : '曲をシェアから今日の1曲を投稿できます'}
         </p>
       </motion.div>
