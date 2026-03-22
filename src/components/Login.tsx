@@ -13,11 +13,48 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  const logSignUpErrorForDebug = (
+    signUpError: {
+      message: string;
+      name?: string;
+      status?: number;
+      code?: string;
+    },
+    options?: { alsoAlert?: boolean }
+  ) => {
+    const extra: Record<string, unknown> = {};
+    for (const key of Object.keys(signUpError)) {
+      if (!['message', 'name', 'status', 'code'].includes(key)) {
+        try {
+          extra[key] = (signUpError as Record<string, unknown>)[key];
+        } catch {
+          /* skip non-serializable */
+        }
+      }
+    }
+    const payload = {
+      message: signUpError.message,
+      name: signUpError.name,
+      status: signUpError.status,
+      code: signUpError.code,
+      ...extra,
+    };
+    const asJson = JSON.stringify(payload, null, 2);
+    console.error('SignUp error (copy-paste / Postgres hints):', asJson);
+    console.error('SignUp error (raw object):', signUpError);
+    if (options?.alsoAlert) {
+      window.alert(
+        `SignUp error (copy for support):\n\n${asJson}\n\n(Also logged to console.)`
+      );
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setMessage(null);
-    if (!email.trim() || !password) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {
       setError('メールアドレスとパスワードを入力してください');
       return;
     }
@@ -25,18 +62,30 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       if (mode === 'signup') {
-        const trimmedEmail = email.trim();
         const { data, error: signUpError } = await supabase.auth.signUp({
-          email: trimmedEmail,
+          email: normalizedEmail,
           password,
         });
 
         console.log('Full SignUp Response:', data, signUpError);
 
         // No `public.users` write here — nothing from the DB layer should touch this flow.
-        // Treat successful Auth response as complete success for the UI.
         if (signUpError) {
-          setError(signUpError.message);
+          const rawMsg = signUpError.message ?? '';
+          const isDatabaseError = rawMsg
+            .toLowerCase()
+            .includes('database error');
+          // Full object in console + optional popup for copy-paste (status/code, etc.)
+          logSignUpErrorForDebug(signUpError, { alsoAlert: true });
+          // Supabase Auth can surface trigger/constraint failures as this generic message
+          if (isDatabaseError) {
+            setMessage(
+              '登録処理を受け付けました。一度ログインを試してみてください。'
+            );
+            setMode('signin');
+            return;
+          }
+          setError(rawMsg);
           return;
         }
 
@@ -44,7 +93,7 @@ export default function Login() {
         setMode('signin');
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: normalizedEmail,
           password,
         });
         if (signInError) throw signInError;
