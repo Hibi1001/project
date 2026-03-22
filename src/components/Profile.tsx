@@ -9,10 +9,57 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Cropper, { type Area } from 'react-easy-crop';
 import { fetchUserById, fetchPostsByUserId } from '../lib/api';
 import type { User, Post } from '../types';
 import { supabase } from '../lib/supabase';
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener('load', () => resolve(image));
+    image.addEventListener('error', (err) => reject(err));
+    image.src = src;
+  });
+}
+
+/** Renders the cropped 1:1 region to a square JPEG blob for upload. */
+async function getCroppedImageBlob(
+  imageSrc: string,
+  pixelCrop: Area,
+  outputSize = 512,
+): Promise<Blob> {
+  const image = await loadImageElement(imageSrc);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas が利用できません。');
+
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+  ctx.drawImage(
+    image,
+    pixelCrop.x,
+    pixelCrop.y,
+    pixelCrop.width,
+    pixelCrop.height,
+    0,
+    0,
+    outputSize,
+    outputSize,
+  );
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) reject(new Error('画像の切り抜きに失敗しました。'));
+        else resolve(blob);
+      },
+      'image/jpeg',
+      0.92,
+    );
+  });
+}
 
 interface ProfileProps {
   userId: string;
@@ -30,6 +77,14 @@ export default function Profile({ userId, onBack }: ProfileProps) {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const [avatarCropOpen, setAvatarCropOpen] = useState(false);
+  const [avatarCropImageSrc, setAvatarCropImageSrc] = useState<string | null>(
+    null,
+  );
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const croppedAreaPixelsRef = useRef<Area | null>(null);
 
   const [displayName, setDisplayName] = useState('');
   const [playedInstruments, setPlayedInstruments] = useState('');
@@ -95,6 +150,20 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
   const isOwnProfile = authUserId === userId;
 
+  const onAvatarCropComplete = useCallback(
+    (_area: Area, areaPixels: Area) => {
+      croppedAreaPixelsRef.current = areaPixels;
+    },
+    [],
+  );
+
+  const revokeCropObjectUrl = useCallback(() => {
+    setAvatarCropImageSrc((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }, []);
+
   const openEdit = () => {
     if (!user) return;
     setSaveError(null);
@@ -112,8 +181,89 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
   const closeEdit = () => {
     if (isSaving) return;
+    if (avatarCropOpen) {
+      setAvatarCropOpen(false);
+      revokeCropObjectUrl();
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+      croppedAreaPixelsRef.current = null;
+    }
     setIsEditOpen(false);
     setSaveError(null);
+  };
+
+  const cancelAvatarCrop = () => {
+    setAvatarCropOpen(false);
+    revokeCropObjectUrl();
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    croppedAreaPixelsRef.current = null;
+  };
+
+  const uploadCroppedAvatar = async (blob: Blob) => {
+    if (!authUserId || authUserId !== userId) return;
+
+    const objectPath = `${authUserId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.jpg`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(objectPath, blob, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: 'image/jpeg',
+      });
+
+    if (uploadError) {
+      setAvatarUploadError(uploadError.message);
+      return;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from('avatars').getPublicUrl(objectPath);
+
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ avatar_url: publicUrl })
+      .eq('id', authUserId);
+
+    if (updateError) {
+      setAvatarUploadError(updateError.message);
+      return;
+    }
+
+    const refreshed = await fetchUserById(userId);
+    setUser(refreshed);
+  };
+
+  const handleConfirmAvatarCrop = async () => {
+    const src = avatarCropImageSrc;
+    const pixels = croppedAreaPixelsRef.current;
+    if (!src || !pixels || !authUserId || authUserId !== userId) return;
+
+    setAvatarUploading(true);
+    setAvatarUploadError(null);
+
+    try {
+      const blob = await getCroppedImageBlob(src, pixels);
+      URL.revokeObjectURL(src);
+      setAvatarCropImageSrc(null);
+      setAvatarCropOpen(false);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+      croppedAreaPixelsRef.current = null;
+
+      await uploadCroppedAvatar(blob);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : '画像の処理に失敗しました。';
+      setAvatarUploadError(message);
+      URL.revokeObjectURL(src);
+      setAvatarCropImageSrc(null);
+      setAvatarCropOpen(false);
+    } finally {
+      setAvatarUploading(false);
+    }
   };
 
   const toStringArray = (value: string) =>
@@ -129,9 +279,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
     return `https://${t}`;
   };
 
-  const handleAvatarFileChange = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !authUserId || authUserId !== userId) return;
@@ -144,46 +292,15 @@ export default function Profile({ userId, onBack }: ProfileProps) {
       return;
     }
 
-    setAvatarUploading(true);
     setAvatarUploadError(null);
-
-    const ext =
-      file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') ||
-      'jpg';
-    const objectPath = `${authUserId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(objectPath, file, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: file.type,
-      });
-
-    if (uploadError) {
-      setAvatarUploadError(uploadError.message);
-      setAvatarUploading(false);
-      return;
-    }
-
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('avatars').getPublicUrl(objectPath);
-
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ avatar_url: publicUrl })
-      .eq('id', authUserId);
-
-    if (updateError) {
-      setAvatarUploadError(updateError.message);
-      setAvatarUploading(false);
-      return;
-    }
-
-    const refreshed = await fetchUserById(userId);
-    setUser(refreshed);
-    setAvatarUploading(false);
+    setAvatarCropImageSrc((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    croppedAreaPixelsRef.current = null;
+    setAvatarCropOpen(true);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -520,12 +637,12 @@ export default function Profile({ userId, onBack }: ProfileProps) {
                             accept="image/*"
                             className="hidden"
                             onChange={handleAvatarFileChange}
-                            disabled={avatarUploading || isSaving}
+                            disabled={avatarUploading || isSaving || avatarCropOpen}
                           />
                           <button
                             type="button"
                             onClick={() => avatarInputRef.current?.click()}
-                            disabled={avatarUploading || isSaving}
+                            disabled={avatarUploading || isSaving || avatarCropOpen}
                             className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm font-semibold hover:bg-zinc-700 hover:border-zinc-600 transition-colors disabled:opacity-50"
                           >
                             {avatarUploading
@@ -533,7 +650,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
                               : '写真を選択（カメラ・アルバム）'}
                           </button>
                           <p className="text-xs text-zinc-500">
-                            JPEG / PNG など（最大5MB）。保存ボタンを押さなくても反映されます。
+                            JPEG / PNG など（最大5MB）。選択後に1:1の範囲を決めてからアップロードされます。ピンチ・ドラッグで調整できます（保存ボタンは不要）。
                           </p>
                         </div>
                       </div>
@@ -673,6 +790,116 @@ export default function Profile({ userId, onBack }: ProfileProps) {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {avatarCropOpen && avatarCropImageSrc && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 pb-10 sm:pb-4"
+          >
+            <motion.div
+              role="presentation"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm cursor-default"
+              onClick={avatarUploading ? undefined : cancelAvatarCrop}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.98 }}
+              transition={{ type: 'spring', duration: 0.35 }}
+              className="relative z-10 w-full max-w-lg max-h-[90dvh] flex flex-col bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-800 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+                <h2 className="text-base font-semibold text-zinc-50 pr-2">
+                  プロフィール写真を切り抜き
+                </h2>
+                <button
+                  type="button"
+                  onClick={cancelAvatarCrop}
+                  disabled={avatarUploading}
+                  className="p-2 rounded-full text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 transition-colors disabled:opacity-50 shrink-0"
+                  aria-label="閉じる"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div
+                className="relative w-full h-[min(58dvh,380px)] sm:h-[400px] bg-zinc-950 mx-auto"
+                style={{ touchAction: 'none' }}
+              >
+                <Cropper
+                  image={avatarCropImageSrc}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  cropShape="round"
+                  showGrid={false}
+                  onCropChange={setCrop}
+                  onZoomChange={setZoom}
+                  onCropComplete={onAvatarCropComplete}
+                  objectFit="contain"
+                  minZoom={1}
+                  maxZoom={3}
+                />
+              </div>
+
+              <div className="px-4 py-3 space-y-2 border-t border-zinc-800 shrink-0 bg-zinc-900">
+                <div className="flex items-center justify-between gap-3">
+                  <label
+                    htmlFor="avatar-crop-zoom"
+                    className="text-xs text-zinc-400 shrink-0"
+                  >
+                    拡大・縮小
+                  </label>
+                  <span className="text-xs text-zinc-500 tabular-nums">
+                    {zoom.toFixed(2)}×
+                  </span>
+                </div>
+                <input
+                  id="avatar-crop-zoom"
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.01}
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  disabled={avatarUploading}
+                  className="w-full h-2 accent-emerald-500 cursor-pointer touch-pan-x"
+                />
+                <p className="text-[11px] text-zinc-500 leading-snug">
+                  ドラッグで位置、スライダーまたはピンチで拡大できます。丸い枠内がアイコンになります。
+                </p>
+              </div>
+
+              <div className="flex gap-3 p-4 pt-2 border-t border-zinc-800 shrink-0">
+                <button
+                  type="button"
+                  onClick={cancelAvatarCrop}
+                  disabled={avatarUploading}
+                  className="flex-1 py-3 rounded-xl border border-zinc-600 text-zinc-200 text-sm font-semibold hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmAvatarCrop()}
+                  disabled={avatarUploading}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-semibold shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition-all disabled:opacity-50"
+                >
+                  {avatarUploading ? 'アップロード中...' : 'この範囲でアップロード'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
