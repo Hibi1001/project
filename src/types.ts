@@ -33,6 +33,8 @@ export type InstrumentType = 'vocal' | 'guitar' | 'bass' | 'drum' | 'keyboard';
 
 export interface DbUser {
   id: string;
+  /** Synced from auth at signup when the column exists; optional per schema. */
+  email?: string | null;
   display_id: string | null;
   display_name: string;
   avatar_url: string | null;

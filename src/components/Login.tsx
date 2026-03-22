@@ -39,34 +39,56 @@ export default function Login() {
 
         const userId = data.user?.id;
         if (userId) {
-          const displayName = emailPrefix(email.trim());
-          // Do NOT include `display_id` in the payload: let the DB default to NULL so
-          // multiple new users don't hit UNIQUE issues (never send "" either).
-          // `display_id` can be set later on the Profile page.
-          const newUserRow = {
-            id: userId,
-            display_name: displayName,
-            avatar_url: null as string | null,
-            played_instruments: null as string[] | null,
-            favorite_genres: null as string[] | null,
-            top_3_bands: null as string[] | null,
-            my_gear: null as string[] | null,
-            recruitment_status: null as string | null,
-          };
+          const trimmedEmail = email.trim();
+          const displayName =
+            emailPrefix(trimmedEmail) || trimmedEmail || 'User';
 
-          const { error: profileError } = await supabase
-            .from('users')
-            .upsert(newUserRow, { onConflict: 'id' });
+          // Minimal `public.users` row: never send `display_id` (DB default NULL).
+          // Do not send nulls for optional columns or empty strings — avoids UNIQUE('') issues.
+          try {
+            const minimalUserRow = {
+              id: userId,
+              email: trimmedEmail,
+              display_name: displayName,
+            };
 
-          if (profileError) {
-            console.error('Error creating user profile', profileError);
+            const { error: profileError } = await supabase
+              .from('users')
+              .upsert(minimalUserRow, { onConflict: 'id' });
+
+            if (profileError) {
+              console.error(
+                '[Login signup] users upsert failed — full PostgREST error:',
+                profileError,
+              );
+              console.error(
+                '[Login signup] serialized:',
+                JSON.stringify(
+                  profileError,
+                  ['name', 'message', 'code', 'details', 'hint'],
+                  2,
+                ),
+              );
+              setMessage(
+                '新規登録しました。メール認証が必要な場合は受信箱を確認してください。' +
+                  ' プロフィール行の同期に失敗した場合は、ログイン後に「プロフィールを編集」から保存してください。'
+              );
+            } else {
+              setMessage(
+                '新規登録しました。メール認証が必要な場合は受信箱を確認してください。表示IDはプロフィール編集で後から設定できます。'
+              );
+            }
+          } catch (profileCatch: unknown) {
+            console.error(
+              '[Login signup] users upsert threw — full error:',
+              profileCatch,
+            );
+            if (profileCatch instanceof Error) {
+              console.error('[Login signup] stack:', profileCatch.stack);
+            }
             setMessage(
               '新規登録しました。メール認証が必要な場合は受信箱を確認してください。' +
-                ' プロフィール行の作成に失敗した場合は、ログイン後に「プロフィールを編集」から表示IDなどを保存して同期してください。'
-            );
-          } else {
-            setMessage(
-              '新規登録しました。メール認証が必要な場合は受信箱を確認してください。表示IDはプロフィール編集で後から設定できます。'
+                ' プロフィールの保存で例外が発生しました。ログイン後にプロフィールを開いてください。'
             );
           }
         } else {
