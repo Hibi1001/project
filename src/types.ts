@@ -11,12 +11,21 @@ export interface User {
   recruitment: string;
 }
 
+/** Max length for `posts.caption` (ひとこと). */
+export const POST_CAPTION_MAX_LENGTH = 40;
+/** Max length for `post_replies.content`. */
+export const POST_REPLY_MAX_LENGTH = 100;
+
 export interface Post {
   id: string;
   userId: string;
   songTitle: string;
   artist: string;
   albumArt: string;
+  /** Story-style short note; null if empty. */
+  caption: string | null;
+  /** Number of rows in `post_replies` for this post. */
+  replyCount: number;
   previewUrl?: string;
   reactions: {
     vocal: number;
@@ -52,7 +61,26 @@ export interface DbPost {
   artist_name: string;
   preview_url: string;
   cover_url?: string | null;
+  caption?: string | null;
   created_at: string;
+}
+
+export interface DbPostReply {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+}
+
+/** Reply row enriched for UI. */
+export interface PostReply {
+  id: string;
+  userId: string;
+  content: string;
+  createdAt: string;
+  authorName: string;
+  authorAvatar: string;
 }
 
 export interface DbReaction {

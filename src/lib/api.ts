@@ -1,5 +1,14 @@
 import { supabase } from './supabase';
-import type { Post, User, InstrumentType, DbPost, DbReaction, DbUser } from '../types';
+import type {
+  Post,
+  PostReply,
+  User,
+  InstrumentType,
+  DbPost,
+  DbReaction,
+  DbUser,
+} from '../types';
+import { POST_CAPTION_MAX_LENGTH, POST_REPLY_MAX_LENGTH } from '../types';
 
 type DbInstrument = InstrumentType;
 
@@ -29,7 +38,8 @@ const DEFAULT_COVER_URL = 'https://placehold.co/300x300?text=No+Cover';
 
 function mapDbPostToPost(
   post: DbPost,
-  reactions?: DbReaction[] | null
+  reactions?: DbReaction[] | null,
+  replyCount = 0,
 ): Post {
   return {
     id: post.id,
@@ -37,9 +47,47 @@ function mapDbPostToPost(
     songTitle: post.song_title,
     artist: post.artist_name,
     albumArt: post.cover_url ?? DEFAULT_COVER_URL,
+    caption: post.caption ?? null,
+    replyCount,
     previewUrl: post.preview_url,
     reactions: aggregateReactions(reactions),
   };
+}
+
+export async function fetchReplyCountForPost(postId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('post_replies')
+    .select('*', { count: 'exact', head: true })
+    .eq('post_id', postId);
+
+  if (error) {
+    console.error('Error counting replies', error);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+async function fetchReplyCountsByPostIds(
+  postIds: string[],
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (postIds.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from('post_replies')
+    .select('post_id')
+    .in('post_id', postIds);
+
+  if (error) {
+    console.error('Error fetching reply counts', error);
+    return map;
+  }
+
+  for (const row of data ?? []) {
+    const pid = (row as { post_id: string }).post_id;
+    map.set(pid, (map.get(pid) ?? 0) + 1);
+  }
+  return map;
 }
 
 const UUID_RE =
@@ -104,8 +152,14 @@ export async function fetchTimelinePosts(): Promise<Post[]> {
     reactionsByPostId.set(reaction.post_id, existing);
   });
 
+  const replyCounts = await fetchReplyCountsByPostIds(postIds);
+
   return (postsData ?? []).map((post) =>
-    mapDbPostToPost(post, reactionsByPostId.get(post.id))
+    mapDbPostToPost(
+      post,
+      reactionsByPostId.get(post.id),
+      replyCounts.get(post.id) ?? 0,
+    ),
   );
 }
 
@@ -192,8 +246,14 @@ export async function fetchPostsByUserId(userId: string): Promise<Post[]> {
     reactionsByPostId.set(reaction.post_id, existing);
   });
 
+  const replyCounts = await fetchReplyCountsByPostIds(postIds);
+
   return (postsData ?? []).map((post) =>
-    mapDbPostToPost(post, reactionsByPostId.get(post.id))
+    mapDbPostToPost(
+      post,
+      reactionsByPostId.get(post.id),
+      replyCounts.get(post.id) ?? 0,
+    ),
   );
 }
 
@@ -262,9 +322,17 @@ export interface CreatePostParams {
   artistName: string;
   previewUrl: string | null;
   coverUrl: string;
+  /** ひとこと — max {@link POST_CAPTION_MAX_LENGTH} chars. */
+  caption?: string | null;
 }
 
 export async function createPost(params: CreatePostParams): Promise<Post> {
+  const rawCap = params.caption?.trim() ?? '';
+  const caption =
+    rawCap.length > 0
+      ? rawCap.slice(0, POST_CAPTION_MAX_LENGTH)
+      : null;
+
   const { data, error } = await supabase
     .from('posts')
     .insert({
@@ -273,6 +341,7 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
       artist_name: params.artistName.trim(),
       preview_url: params.previewUrl ?? '',
       cover_url: params.coverUrl,
+      caption,
     })
     .select()
     .single();
@@ -282,7 +351,64 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
     throw new Error(error.message);
   }
 
-  return mapDbPostToPost(data);
+  return mapDbPostToPost(data as DbPost, undefined, 0);
+}
+
+export async function fetchPostReplies(postId: string): Promise<PostReply[]> {
+  const { data, error } = await supabase
+    .from('post_replies')
+    .select('id, user_id, content, created_at')
+    .eq('post_id', postId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching post replies', error);
+    return [];
+  }
+
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  const userIds = [...new Set(rows.map((r) => r.user_id as string))];
+  const users = await Promise.all(userIds.map((id) => fetchUserById(id)));
+  const userMap = new Map(
+    users.filter(Boolean).map((u) => [u!.id, u!] as const),
+  );
+
+  return rows.map((r) => {
+    const uid = r.user_id as string;
+    const u = userMap.get(uid);
+    return {
+      id: r.id as string,
+      userId: uid,
+      content: r.content as string,
+      createdAt: r.created_at as string,
+      authorName: u?.name ?? 'ユーザー',
+      authorAvatar: u?.avatar ?? '',
+    };
+  });
+}
+
+export async function insertPostReply(
+  postId: string,
+  userId: string,
+  content: string,
+): Promise<void> {
+  const trimmed = content.trim().slice(0, POST_REPLY_MAX_LENGTH);
+  if (!trimmed) {
+    throw new Error('返信を入力してください');
+  }
+
+  const { error } = await supabase.from('post_replies').insert({
+    post_id: postId,
+    user_id: userId,
+    content: trimmed,
+  });
+
+  if (error) {
+    console.error('Error inserting reply', error);
+    throw new Error(error.message);
+  }
 }
 
 export interface iTunesSongResult {

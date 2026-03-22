@@ -8,6 +8,7 @@ import {
   getShareCooldownFromLatestPost,
 } from '../lib/api';
 import { getAuthRedirectBaseUrl, supabase } from '../lib/supabase';
+import { POST_CAPTION_MAX_LENGTH } from '../types';
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -34,6 +35,7 @@ export default function CreatePostModal({
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [caption, setCaption] = useState('');
 
   useEffect(() => {
     const fetchRecentlyPlayed = async () => {
@@ -115,8 +117,10 @@ export default function CreatePostModal({
         artistName: track.artist,
         previewUrl: track.previewUrl,
         coverUrl: track.albumArt,
+        caption: caption.trim() || null,
       });
       setTracks([]);
+      setCaption('');
       onClose();
       onSubmitSuccess();
     } catch (err) {
@@ -130,6 +134,7 @@ export default function CreatePostModal({
     if (!isSubmitting) {
       setError(null);
       setTracks([]);
+      setCaption('');
       onClose();
     }
   };
@@ -217,6 +222,30 @@ export default function CreatePostModal({
 
                 {spotifyAccessToken && (
                   <div className="mt-3 flex-1 min-h-0 flex flex-col">
+                    <div className="mb-3 shrink-0 rounded-xl border border-zinc-700/80 bg-zinc-800/40 px-3 py-2">
+                      <label
+                        htmlFor="post-caption"
+                        className="text-xs font-medium text-zinc-400"
+                      >
+                        ひとこと（任意・{POST_CAPTION_MAX_LENGTH}文字まで）
+                      </label>
+                      <textarea
+                        id="post-caption"
+                        value={caption}
+                        onChange={(e) =>
+                          setCaption(
+                            e.target.value.slice(0, POST_CAPTION_MAX_LENGTH),
+                          )
+                        }
+                        rows={2}
+                        placeholder="今日の気分をひとこと…"
+                        disabled={isSubmitting || shareSongBlocked}
+                        className="mt-1.5 w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900/80 px-2.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
+                      />
+                      <p className="mt-1 text-right text-[10px] text-zinc-500">
+                        {caption.length}/{POST_CAPTION_MAX_LENGTH}
+                      </p>
+                    </div>
                     {isLoading && (
                       <p className="text-sm text-zinc-500 py-4">Spotify から取得中...</p>
                     )}

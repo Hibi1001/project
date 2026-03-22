@@ -32,6 +32,8 @@ export const posts: Post[] = [
     songTitle: 'STAY TUNE',
     artist: 'Suchmos',
     albumArt: 'https://images.pexels.com/photos/1763075/pexels-photo-1763075.jpeg?auto=compress&cs=tinysrgb&w=600',
+    caption: null,
+    replyCount: 0,
     reactions: {
       vocal: 3,
       guitar: 5,
@@ -46,6 +48,8 @@ export const posts: Post[] = [
     songTitle: 'Never Meant',
     artist: 'American Football',
     albumArt: 'https://images.pexels.com/photos/1699161/pexels-photo-1699161.jpeg?auto=compress&cs=tinysrgb&w=600',
+    caption: null,
+    replyCount: 0,
     reactions: {
       vocal: 2,
       guitar: 15,

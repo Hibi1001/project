@@ -83,6 +83,7 @@ export async function seedTimelineTestData(): Promise<{
       artist_name: 'Seed Artist One',
       preview_url: '',
       cover_url: DEFAULT_COVER,
+      caption: '今日の一曲、聴いてね',
       created_at: daysAgoAtTime(0, 9, 15),
     },
     {
@@ -92,6 +93,7 @@ export async function seedTimelineTestData(): Promise<{
       artist_name: 'Seed Artist Two',
       preview_url: '',
       cover_url: DEFAULT_COVER,
+      caption: null,
       created_at: daysAgoAtTime(1, 14, 30),
     },
     {
@@ -101,6 +103,7 @@ export async function seedTimelineTestData(): Promise<{
       artist_name: 'Seed Artist Three',
       preview_url: '',
       cover_url: DEFAULT_COVER,
+      caption: null,
       created_at: daysAgoAtTime(1, 19, 45),
     },
     {
@@ -110,6 +113,7 @@ export async function seedTimelineTestData(): Promise<{
       artist_name: 'Seed Artist One',
       preview_url: '',
       cover_url: DEFAULT_COVER,
+      caption: null,
       created_at: daysAgoAtTime(3, 12, 0),
     },
     {
@@ -119,6 +123,7 @@ export async function seedTimelineTestData(): Promise<{
       artist_name: 'Seed Artist Two',
       preview_url: '',
       cover_url: DEFAULT_COVER,
+      caption: null,
       created_at: daysAgoAtTime(3, 21, 10),
     },
   ];

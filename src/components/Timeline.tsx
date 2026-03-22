@@ -1,11 +1,26 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Guitar, Music2, Drum, Piano, Plus, Play, Pause } from 'lucide-react';
-import { Post, InstrumentType } from '../types';
-import { fetchTimelinePosts, fetchUserById } from '../lib/api';
+import {
+  Mic,
+  Guitar,
+  Music2,
+  Drum,
+  Piano,
+  Plus,
+  Play,
+  Pause,
+  MessageCircle,
+} from 'lucide-react';
+import { Post, InstrumentType, User } from '../types';
+import {
+  fetchTimelinePosts,
+  fetchUserById,
+  fetchReplyCountForPost,
+} from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
+import PostReplySheet from './PostReplySheet';
 
 interface TimelineProps {
   /** UUID or `display_id` for routing (`/@handle` or `/user/uuid`). */
@@ -24,26 +39,26 @@ export default function Timeline({
   shareCooldownText = '',
 }: TimelineProps) {
   const [posts, setPosts] = useState<Post[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [visiblePostId, setVisiblePostId] = useState<string | null>(null);
+  const [usersById, setUsersById] = useState<Record<string, User>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [hasPostedToday, setHasPostedToday] = useState(false);
-  /** Lets users browse the timeline during 12h cooldown without posting today (calendar day). */
   const [viewTimelineWithoutPostToday, setViewTimelineWithoutPostToday] =
     useState(false);
   const [seedRefreshNonce, setSeedRefreshNonce] = useState(0);
   const [isSeeding, setIsSeeding] = useState(false);
-  const [currentUser, setCurrentUser] = useState<{
-    id: string;
-    displayId: string | null;
-    name: string;
-    avatar: string;
-  } | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [userReactionSet, setUserReactionSet] = useState<Set<InstrumentType>>(new Set());
+  const [userReactionSet, setUserReactionSet] = useState<
+    Set<InstrumentType>
+  >(new Set());
+  const [replySheetOpen, setReplySheetOpen] = useState(false);
+  const [replySheetPostId, setReplySheetPostId] = useState<string | null>(
+    null,
+  );
 
   const instrumentIcons = {
     vocal: Mic,
@@ -51,6 +66,26 @@ export default function Timeline({
     bass: Music2,
     drum: Drum,
     keyboard: Piano,
+  };
+
+  const visiblePost =
+    posts.find((p) => p.id === visiblePostId) ?? posts[0] ?? null;
+
+  const syncReplyCount = useCallback(async (postId: string) => {
+    const c = await fetchReplyCountForPost(postId);
+    setPosts((prev) =>
+      prev.map((p) => (p.id === postId ? { ...p, replyCount: c } : p)),
+    );
+  }, []);
+
+  const openReplySheet = (postId: string) => {
+    setReplySheetPostId(postId);
+    setReplySheetOpen(true);
+  };
+
+  const closeReplySheet = () => {
+    setReplySheetOpen(false);
+    setReplySheetPostId(null);
   };
 
   const refreshReactionsForPost = async (postId: string, userId: string) => {
@@ -73,13 +108,16 @@ export default function Timeline({
     };
 
     const mine = new Set<InstrumentType>();
-    (data ?? []).forEach((r: { instrument_type: InstrumentType; user_id: string }) => {
-      if (counts[r.instrument_type] !== undefined) counts[r.instrument_type] += 1;
-      if (r.user_id === userId) mine.add(r.instrument_type);
-    });
+    (data ?? []).forEach(
+      (r: { instrument_type: InstrumentType; user_id: string }) => {
+        if (counts[r.instrument_type] !== undefined)
+          counts[r.instrument_type] += 1;
+        if (r.user_id === userId) mine.add(r.instrument_type);
+      },
+    );
 
     setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, reactions: counts } : p))
+      prev.map((p) => (p.id === postId ? { ...p, reactions: counts } : p)),
     );
     setUserReactionSet(mine);
   };
@@ -87,7 +125,6 @@ export default function Timeline({
   const toggleReaction = async (postId: string, instrument: InstrumentType) => {
     if (!authUserId) return;
 
-    // Optimistic UI update (count + highlight) while syncing with DB.
     const alreadyReacted = userReactionSet.has(instrument);
     setUserReactionSet((prev) => {
       const next = new Set(prev);
@@ -102,11 +139,14 @@ export default function Timeline({
               ...p,
               reactions: {
                 ...p.reactions,
-                [instrument]: Math.max(0, p.reactions[instrument] + (alreadyReacted ? -1 : 1)),
+                [instrument]: Math.max(
+                  0,
+                  p.reactions[instrument] + (alreadyReacted ? -1 : 1),
+                ),
               },
             }
-          : p
-      )
+          : p,
+      ),
     );
 
     const { data: existing, error: existingError } = await supabase
@@ -146,7 +186,6 @@ export default function Timeline({
       }
     }
 
-    // Ensure counts and highlight reflect DB truth.
     await refreshReactionsForPost(postId, authUserId);
   };
 
@@ -188,7 +227,15 @@ export default function Timeline({
       }
 
       const now = new Date();
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const startOfToday = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
 
       const { data, error } = await supabase
         .from('posts')
@@ -224,12 +271,86 @@ export default function Timeline({
         return true;
       });
       setPosts(deduped);
-      setCurrentIndex((idx) => Math.min(idx, Math.max(0, deduped.length - 1)));
+      setVisiblePostId(deduped[0]?.id ?? null);
       setIsLoading(false);
     };
 
     loadPosts();
   }, [timelineRefreshTrigger, seedRefreshNonce]);
+
+  useEffect(() => {
+    if (posts.length === 0) {
+      setUsersById({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const ids = [...new Set(posts.map((p) => p.userId))];
+      const results = await Promise.all(ids.map((id) => fetchUserById(id)));
+      if (cancelled) return;
+      const next: Record<string, User> = {};
+      results.forEach((u) => {
+        if (u) next[u.id] = u;
+      });
+      setUsersById(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [posts]);
+
+  useEffect(() => {
+    if (posts.length === 0) return;
+    if (visiblePostId && !posts.some((p) => p.id === visiblePostId)) {
+      setVisiblePostId(posts[0].id);
+    }
+  }, [posts, visiblePostId]);
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || posts.length === 0) return;
+
+    const ratios = new Map<Element, number>();
+    let raf = 0;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const en of entries) {
+          if (en.isIntersecting) ratios.set(en.target, en.intersectionRatio);
+          else ratios.delete(en.target);
+        }
+        let bestEl: Element | null = null;
+        let best = 0;
+        for (const [el, r] of ratios) {
+          if (r > best) {
+            best = r;
+            bestEl = el;
+          }
+        }
+        const id =
+          bestEl instanceof HTMLElement
+            ? bestEl.dataset.postId ?? null
+            : null;
+        if (id) setVisiblePostId(id);
+      },
+      {
+        root,
+        rootMargin: '-18% 0px -18% 0px',
+        threshold: [0, 0.15, 0.35, 0.55, 0.75, 1],
+      },
+    );
+
+    raf = requestAnimationFrame(() => {
+      root.querySelectorAll('[data-timeline-post]').forEach((el) => {
+        obs.observe(el);
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(raf);
+      obs.disconnect();
+    };
+  }, [posts]);
 
   const handleSeedTestData = async () => {
     setIsSeeding(true);
@@ -242,7 +363,6 @@ export default function Timeline({
         );
         return;
       }
-      // Jump to timeline in dev so you can browse dummy posts without posting today.
       if (import.meta.env.DEV) {
         setViewTimelineWithoutPostToday(true);
       }
@@ -265,86 +385,52 @@ export default function Timeline({
     ) : null;
 
   useEffect(() => {
-    const handleScroll = (e: WheelEvent) => {
-      if (Math.abs(e.deltaY) > 30) {
-        if (e.deltaY > 0 && currentIndex < posts.length - 1) {
-          setCurrentIndex((prev) => prev + 1);
-        } else if (e.deltaY < 0 && currentIndex > 0) {
-          setCurrentIndex((prev) => prev - 1);
-        }
-      }
-    };
-
-    const container = containerRef.current;
-    if (container) {
-      container.addEventListener('wheel', handleScroll, { passive: true });
-    }
-
-    return () => {
-      if (container) {
-        container.removeEventListener('wheel', handleScroll);
-      }
-    };
-  }, [currentIndex, posts.length]);
-
-  useEffect(() => {
-    const currentPost = posts[currentIndex];
-    if (!currentPost) {
-      setCurrentUser(null);
-      return;
-    }
-    let cancelled = false;
-    const loadUser = async () => {
-      const user = await fetchUserById(currentPost.userId);
-      if (!cancelled && user) {
-        setCurrentUser({
-          id: user.id,
-          displayId: user.displayId,
-          name: user.name,
-          avatar: user.avatar,
-        });
-      } else if (!cancelled) {
-        setCurrentUser(null);
-      }
-    };
-    loadUser();
-    return () => {
-      cancelled = true;
-    };
-  }, [posts, currentIndex]);
-
-  useEffect(() => {
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
       audio.currentTime = 0;
     }
     setIsPlaying(false);
-  }, [currentIndex]);
+  }, [visiblePostId]);
 
   useEffect(() => {
-    const currentPost = posts[currentIndex];
-    if (!authUserId || !currentPost) return;
-    refreshReactionsForPost(currentPost.id, authUserId);
+    if (!authUserId || !visiblePost) return;
+    refreshReactionsForPost(visiblePost.id, authUserId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUserId, currentIndex, posts.length]);
+  }, [authUserId, visiblePost?.id, posts.length]);
+
+  const shareFab = (
+    <motion.button
+      whileHover={shareSongDisabled ? {} : { scale: 1.05 }}
+      whileTap={shareSongDisabled ? {} : { scale: 0.95 }}
+      onClick={shareSongDisabled ? undefined : onShareSong}
+      disabled={shareSongDisabled}
+      title={
+        shareSongDisabled && shareCooldownText ? shareCooldownText : undefined
+      }
+      className={`fixed bottom-8 right-8 z-30 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ${
+        shareSongDisabled
+          ? 'cursor-not-allowed bg-zinc-700 opacity-50'
+          : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
+      }`}
+      aria-label="曲をシェア"
+    >
+      <Plus className="h-6 w-6" />
+    </motion.button>
+  );
 
   if (isAuthLoading) {
     return (
       <>
         {devSeedButton}
-        <div
-          ref={containerRef}
-          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
-        >
-          <div className="text-zinc-400 text-sm">Loading timeline...</div>
+        <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
+          <div className="text-sm text-zinc-400">Loading timeline...</div>
         </div>
       </>
     );
   }
 
   if (!hasPostedToday && !viewTimelineWithoutPostToday) {
-    // Main CTA opens share when allowed; during 12h cooldown it switches to "view timeline".
     return (
       <>
         {devSeedButton}
@@ -363,30 +449,9 @@ export default function Timeline({
     return (
       <>
         {devSeedButton}
-        <div
-          ref={containerRef}
-          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
-        >
-          <div className="text-zinc-400 text-sm">Loading timeline...</div>
-          <motion.button
-          whileHover={shareSongDisabled ? {} : { scale: 1.05 }}
-          whileTap={shareSongDisabled ? {} : { scale: 0.95 }}
-          onClick={shareSongDisabled ? undefined : onShareSong}
-          disabled={shareSongDisabled}
-          title={
-            shareSongDisabled && shareCooldownText
-              ? shareCooldownText
-              : undefined
-          }
-          className={`fixed bottom-8 right-8 w-14 h-14 rounded-full text-white shadow-lg flex items-center justify-center z-20 ${
-            shareSongDisabled
-              ? 'bg-zinc-700 cursor-not-allowed opacity-50'
-              : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
-          }`}
-          aria-label="曲をシェア"
-        >
-          <Plus className="w-6 h-6" />
-        </motion.button>
+        <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
+          <div className="text-sm text-zinc-400">Loading timeline...</div>
+          {shareFab}
         </div>
       </>
     );
@@ -396,62 +461,26 @@ export default function Timeline({
     return (
       <>
         {devSeedButton}
-        <div
-          ref={containerRef}
-          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
-        >
-        <div className="text-zinc-400 text-sm text-center max-w-xs">
-          24時間以内のシェアはまだありません。あなたが最初の1曲をシェアしませんか？
-          {shareSongDisabled && shareCooldownText ? (
-            <span className="block mt-3 text-xs text-amber-400/90">
-              {shareCooldownText}
-            </span>
-          ) : null}
-        </div>
-        <motion.button
-          whileHover={shareSongDisabled ? {} : { scale: 1.05 }}
-          whileTap={shareSongDisabled ? {} : { scale: 0.95 }}
-          onClick={shareSongDisabled ? undefined : onShareSong}
-          disabled={shareSongDisabled}
-          title={
-            shareSongDisabled && shareCooldownText
-              ? shareCooldownText
-              : undefined
-          }
-          className={`fixed bottom-8 right-8 w-14 h-14 rounded-full text-white shadow-lg flex items-center justify-center z-20 ${
-            shareSongDisabled
-              ? 'bg-zinc-700 cursor-not-allowed opacity-50'
-              : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
-          }`}
-          aria-label="曲をシェア"
-        >
-          <Plus className="w-6 h-6" />
-        </motion.button>
+        <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
+          <div className="max-w-xs text-center text-sm text-zinc-400">
+            24時間以内のシェアはまだありません。あなたが最初の1曲をシェアしませんか？
+            {shareSongDisabled && shareCooldownText ? (
+              <span className="mt-3 block text-xs text-amber-400/90">
+                {shareCooldownText}
+              </span>
+            ) : null}
+          </div>
+          {shareFab}
         </div>
       </>
     );
   }
 
-  const currentPost = posts[currentIndex];
-  const hasPreview = Boolean(currentPost.previewUrl);
-
-  if (!currentUser) {
-    return (
-      <>
-        {devSeedButton}
-        <div
-          ref={containerRef}
-          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
-        >
-          <div className="text-zinc-400 text-sm">Loading profile…</div>
-        </div>
-      </>
-    );
-  }
+  const hasPreview = Boolean(visiblePost?.previewUrl);
 
   const togglePlayPause = () => {
     const audio = audioRef.current;
-    if (!audio || !hasPreview) return;
+    if (!audio || !visiblePost || !visiblePost.previewUrl) return;
     if (isPlaying) {
       audio.pause();
     } else {
@@ -465,153 +494,272 @@ export default function Timeline({
   return (
     <>
       {devSeedButton}
+      <PostReplySheet
+        postId={replySheetPostId}
+        open={replySheetOpen}
+        onClose={closeReplySheet}
+        authUserId={authUserId}
+        onReplyCreated={(pid) => void syncReplyCount(pid)}
+      />
+
       <div
-        ref={containerRef}
-        className="fixed inset-0 bg-zinc-950 overflow-hidden"
+        ref={scrollRef}
+        className="fixed inset-0 overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth [-webkit-overflow-scrolling:touch]"
+        style={{ scrollSnapType: 'y mandatory' }}
       >
-      {hasPreview && (
+        {posts.map((post) => {
+          const postUser = usersById[post.userId];
+          const profileSlug = postUser?.displayId?.trim()
+            ? postUser.displayId
+            : post.userId;
+
+          return (
+            <section
+              key={post.id}
+              data-timeline-post
+              data-post-id={post.id}
+              className="relative flex min-h-[100dvh] snap-start snap-always flex-col items-center justify-center px-6 pb-40 pt-10"
+              style={{ scrollSnapAlign: 'start' }}
+              onClick={() => openReplySheet(post.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openReplySheet(post.id);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label="返信を開く"
+            >
+              <div
+                className="pointer-events-none absolute inset-0 opacity-20"
+                style={{
+                  backgroundImage: `url(${post.albumArt})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  filter: 'blur(56px)',
+                }}
+              />
+
+              <div className="relative z-10 mx-auto flex w-full max-w-md flex-col items-center">
+                <div className="relative mx-auto mb-6 w-72 shrink-0 sm:w-80">
+                  <img
+                    src={post.albumArt}
+                    alt={post.songTitle}
+                    className="aspect-square w-full rounded-2xl object-cover shadow-2xl"
+                  />
+                  <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-zinc-950/75 to-transparent" />
+                  {post.previewUrl ? (
+                    post.id === visiblePost?.id ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePlayPause();
+                        }}
+                        className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/25 transition-colors hover:bg-black/35"
+                        aria-label={
+                          isPlaying ? '一時停止' : '再生'
+                        }
+                      >
+                        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 shadow-lg">
+                          {isPlaying ? (
+                            <Pause className="h-8 w-8 fill-zinc-900 text-zinc-900" />
+                          ) : (
+                            <Play className="ml-1 h-8 w-8 fill-zinc-900 text-zinc-900" />
+                          )}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          scrollRef.current
+                            ?.querySelector(`[data-post-id="${post.id}"]`)
+                            ?.scrollIntoView({
+                              behavior: 'smooth',
+                              block: 'center',
+                            });
+                        }}
+                        className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/20 transition-colors hover:bg-black/30"
+                        aria-label="この投稿へ移動して再生"
+                      >
+                        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/75 shadow-lg">
+                          <Play className="ml-1 h-7 w-7 text-zinc-800 opacity-80" />
+                        </span>
+                      </button>
+                    )
+                  ) : null}
+                </div>
+
+                <div className="w-full text-center">
+                  <h2 className="mb-1 text-2xl font-bold text-zinc-50 sm:text-3xl">
+                    {post.songTitle}
+                  </h2>
+                  <p className="mb-3 text-lg text-zinc-400 sm:text-xl">
+                    {post.artist}
+                  </p>
+
+                  {post.caption ? (
+                    <div className="mx-auto mt-2 max-w-[92%] rounded-2xl border border-white/20 bg-black/40 px-4 py-3 text-left shadow-lg backdrop-blur-md">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">
+                        ひとこと
+                      </p>
+                      <p className="mt-1.5 text-sm font-medium leading-relaxed text-white drop-shadow-md">
+                        {post.caption}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openReplySheet(post.id);
+                    }}
+                    className="mt-4 inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
+                  >
+                    <MessageCircle className="h-4 w-4 text-emerald-400" />
+                    返信
+                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs tabular-nums text-zinc-300">
+                      {post.replyCount}
+                    </span>
+                  </button>
+                </div>
+
+                {postUser ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onViewProfile(profileSlug);
+                    }}
+                    className="mt-5 inline-flex items-center gap-2 text-emerald-400 transition-colors hover:text-emerald-300"
+                  >
+                    <img
+                      src={postUser.avatar || 'https://placehold.co/32x32?text=U'}
+                      alt={postUser.name}
+                      className="h-8 w-8 rounded-full object-cover"
+                    />
+                    <span className="text-sm font-medium">{postUser.name}</span>
+                  </button>
+                ) : (
+                  <p className="mt-5 text-xs text-zinc-500">プロフィール読込中…</p>
+                )}
+              </div>
+
+              <div
+                className="mx-auto mt-6 w-full max-w-md px-2"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                role="presentation"
+              >
+                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800/80">
+                  <div
+                    className={`h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 ${
+                      post.id === visiblePost?.id ? 'w-full' : 'w-1/3 opacity-40'
+                    }`}
+                  />
+                </div>
+                <p className="mt-2 text-center text-xs text-zinc-500">
+                  {posts.findIndex((p) => p.id === post.id) + 1} / {posts.length}
+                </p>
+              </div>
+            </section>
+          );
+        })}
+
+        <footer className="flex min-h-[32vh] snap-end flex-col items-center justify-center border-t border-zinc-800/60 bg-zinc-950/80 px-6 py-16 text-center">
+          <p className="text-sm font-medium text-zinc-500">
+            タイムラインはここまで
+          </p>
+          <p className="mt-2 max-w-xs text-xs leading-relaxed text-zinc-600">
+            直近24時間のシェアのみ表示しています
+          </p>
+        </footer>
+      </div>
+
+      {hasPreview && visiblePost ? (
         <audio
-          key={`audio-${currentPost.id}`}
+          key={`audio-${visiblePost.id}`}
           ref={audioRef}
-          src={currentPost.previewUrl}
+          src={visiblePost.previewUrl}
           onEnded={handleAudioEnded}
           preload="metadata"
         />
-      )}
-      <motion.div
-        key={currentPost.id}
-        initial={{ opacity: 0, y: 100 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -100 }}
-        transition={{ duration: 0.3 }}
-        className="h-full w-full flex items-center justify-center relative"
-      >
-        <div
-          className="absolute inset-0 opacity-20"
-          style={{
-            backgroundImage: `url(${currentPost.albumArt})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            filter: 'blur(60px)',
-          }}
-        />
+      ) : null}
 
-        <div className="relative z-10 max-w-md w-full mx-auto px-6 flex flex-col justify-center h-full pb-28 sm:pb-0">
-          <motion.div
-            initial={{ scale: 0.8 }}
-            animate={{ scale: 1 }}
-            className="mb-8"
-          >
-            <div className="relative w-72 h-72 sm:w-80 sm:h-80 mx-auto group">
-              <img
-                src={currentPost.albumArt}
-                alt={currentPost.songTitle}
-                className="w-full h-full object-cover rounded-2xl shadow-2xl"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/80 to-transparent rounded-2xl" />
-              {hasPreview && (
-                <button
+      {/* Reaction rail follows the post in view */}
+      {visiblePost ? (
+        <div className="pointer-events-auto fixed bottom-6 left-1/2 z-20 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
+          {(Object.keys(instrumentIcons) as InstrumentType[]).map(
+            (instrument) => {
+              const Icon = instrumentIcons[instrument];
+              const count = visiblePost.reactions[instrument];
+              const isMine = userReactionSet.has(instrument);
+              return (
+                <motion.button
+                  key={instrument}
                   type="button"
-                  onClick={togglePlayPause}
-                  className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/30 hover:bg-black/40 transition-colors"
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() =>
+                    toggleReaction(visiblePost.id, instrument)
+                  }
+                  className="group flex flex-col items-center gap-1"
                 >
-                  <span className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
-                    {isPlaying ? (
-                      <Pause className="w-8 h-8 text-zinc-900 fill-zinc-900" />
-                    ) : (
-                      <Play className="w-8 h-8 text-zinc-900 fill-zinc-900 ml-1" />
-                    )}
+                  <div
+                    className={`flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20 ${
+                      isMine
+                        ? 'bg-emerald-500/10 ring-2 ring-emerald-500/60'
+                        : ''
+                    }`}
+                  >
+                    <Icon
+                      className={`h-6 w-6 transition-colors ${
+                        isMine
+                          ? 'text-emerald-400'
+                          : 'text-zinc-400 group-hover:text-emerald-400'
+                      }`}
+                    />
+                  </div>
+                  <span className="text-xs font-semibold text-zinc-400">
+                    {count}
                   </span>
-                </button>
-              )}
-            </div>
-          </motion.div>
+                </motion.button>
+              );
+            },
+          )}
 
-          <div className="text-center mb-6">
-            <h2 className="text-3xl font-bold text-zinc-50 mb-2">
-              {currentPost.songTitle}
-            </h2>
-            <p className="text-xl text-zinc-400 mb-4">{currentPost.artist}</p>
-
-            <button
+          {usersById[visiblePost.userId] ? (
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.9 }}
               onClick={() =>
                 onViewProfile(
-                  currentUser.displayId?.trim()
-                    ? currentUser.displayId
-                    : currentPost.userId,
+                  usersById[visiblePost.userId].displayId?.trim()
+                    ? usersById[visiblePost.userId].displayId!
+                    : visiblePost.userId,
                 )
               }
-              className="inline-flex items-center gap-2 text-emerald-400 hover:text-emerald-300 transition-colors"
+              className="group mt-0 flex flex-col items-center gap-1 sm:mt-4"
             >
-              <img
-                src={currentUser.avatar}
-                alt={currentUser.name}
-                className="w-8 h-8 rounded-full"
-              />
-              <span className="text-sm font-medium">{currentUser.name}</span>
-            </button>
-          </div>
-
-          <div className="bg-zinc-900/50 backdrop-blur-md rounded-full h-2 mb-4 overflow-hidden">
-            <motion.div
-              initial={{ width: '0%' }}
-              animate={{ width: '100%' }}
-              transition={{ duration: 15, ease: 'linear' }}
-              className="h-full bg-gradient-to-r from-emerald-500 to-teal-400"
-            />
-          </div>
-
-          <div className="text-center text-zinc-500 text-xs mb-8">
-            {currentIndex + 1} / {posts.length}
-          </div>
+              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20">
+                <img
+                  src={
+                    usersById[visiblePost.userId].avatar ||
+                    'https://placehold.co/48x48?text=U'
+                  }
+                  alt={usersById[visiblePost.userId].name}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            </motion.button>
+          ) : null}
         </div>
+      ) : null}
 
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex flex-row gap-3 z-20 sm:absolute sm:bottom-auto sm:left-auto sm:translate-x-0 sm:right-4 sm:top-1/2 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
-          {(Object.keys(instrumentIcons) as InstrumentType[]).map((instrument) => {
-            const Icon = instrumentIcons[instrument];
-            const count = currentPost.reactions[instrument];
-            const isMine = userReactionSet.has(instrument);
-            return (
-              <motion.button
-                key={instrument}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => toggleReaction(currentPost.id, instrument)}
-                className="flex flex-col items-center gap-1 group"
-              >
-                <div className={`w-12 h-12 rounded-full bg-zinc-900/80 backdrop-blur-md flex items-center justify-center group-hover:bg-emerald-500/20 group-hover:scale-110 transition-all ${isMine ? 'ring-2 ring-emerald-500/60 bg-emerald-500/10' : ''}`}>
-                  <Icon className={`w-6 h-6 transition-colors ${isMine ? 'text-emerald-400' : 'text-zinc-400 group-hover:text-emerald-400'}`} />
-                </div>
-                <span className="text-xs text-zinc-400 font-semibold">
-                  {count}
-                </span>
-              </motion.button>
-            );
-          })}
-
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={() =>
-              onViewProfile(
-                currentUser.displayId?.trim()
-                  ? currentUser.displayId
-                  : currentPost.userId,
-              )
-            }
-            className="flex flex-col items-center gap-1 group mt-0 sm:mt-4"
-          >
-            <div className="w-12 h-12 rounded-full bg-zinc-900/80 backdrop-blur-md flex items-center justify-center group-hover:bg-emerald-500/20 group-hover:scale-110 transition-all overflow-hidden">
-              <img
-                src={currentUser.avatar}
-                alt={currentUser.name}
-                className="w-full h-full object-cover"
-              />
-            </div>
-          </motion.button>
-        </div>
-      </motion.div>
-      </div>
+      {shareFab}
     </>
   );
 }
-
