@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, Music, Users, Zap, Award, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchUserById, fetchPostsByUserId } from '../lib/api';
 import type { User, Post } from '../types';
 import { supabase } from '../lib/supabase';
@@ -25,6 +25,9 @@ export default function Profile({ userId, onBack }: ProfileProps) {
   const [top3Bands, setTop3Bands] = useState('');
   const [myGear, setMyGear] = useState('');
   const [recruitmentStatus, setRecruitmentStatus] = useState('');
+  const [instagramUrl, setInstagramUrl] = useState('');
+  const [lineUrl, setLineUrl] = useState('');
+  const persistedSnsRef = useRef({ instagram: '', line: '' });
 
   useEffect(() => {
     const load = async () => {
@@ -35,6 +38,16 @@ export default function Profile({ userId, onBack }: ProfileProps) {
       ]);
       setUser(userData);
       setUserPosts(postsData);
+      const { data: snsRow } = await supabase
+        .from('users')
+        .select('instagram_url, line_url')
+        .eq('id', userId)
+        .maybeSingle();
+      const ig = (snsRow as { instagram_url?: string | null } | null)?.instagram_url ?? '';
+      const ln = (snsRow as { line_url?: string | null } | null)?.line_url ?? '';
+      persistedSnsRef.current = { instagram: ig, line: ln };
+      setInstagramUrl(ig);
+      setLineUrl(ln);
       setIsLoading(false);
     };
 
@@ -79,6 +92,8 @@ export default function Profile({ userId, onBack }: ProfileProps) {
     setTop3Bands((user.topBands ?? []).join(', '));
     setMyGear((user.gear ?? []).join(', '));
     setRecruitmentStatus(user.recruitment ?? '');
+    setInstagramUrl(persistedSnsRef.current.instagram);
+    setLineUrl(persistedSnsRef.current.line);
     setIsEditOpen(true);
   };
 
@@ -109,6 +124,8 @@ export default function Profile({ userId, onBack }: ProfileProps) {
         top_3_bands: toStringArray(top3Bands).slice(0, 3),
         my_gear: toStringArray(myGear),
         recruitment_status: recruitmentStatus.trim(),
+        instagram_url: instagramUrl.trim() || null,
+        line_url: lineUrl.trim() || null,
       })
       .eq('id', authUserId);
 
@@ -120,6 +137,11 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
     const refreshed = await fetchUserById(userId);
     setUser(refreshed);
+    const igSaved = instagramUrl.trim();
+    const lineSaved = lineUrl.trim();
+    persistedSnsRef.current = { instagram: igSaved, line: lineSaved };
+    setInstagramUrl(igSaved);
+    setLineUrl(lineSaved);
     setIsSaving(false);
     setIsEditOpen(false);
   };
@@ -127,7 +149,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
   if (isLoading) {
     return (
       <div className="fixed inset-0 bg-zinc-950 flex items-center justify-center">
-        <div className="text-zinc-400 text-sm">Loading profile...</div>
+        <div className="text-zinc-400 text-sm">プロフィールを読み込み中...</div>
       </div>
     );
   }
@@ -152,7 +174,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
                   onClick={openEdit}
                   className="ml-auto px-4 py-2 rounded-full bg-zinc-800/60 hover:bg-zinc-800 text-zinc-200 text-sm font-semibold border border-zinc-700/60 transition-colors"
                 >
-                  Edit Profile (編集)
+                  プロフィールを編集
                 </button>
                 <button
                   type="button"
@@ -327,7 +349,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
               <div className="w-full max-w-lg max-h-[85vh] bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-800 overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
                   <h2 className="text-lg font-semibold text-zinc-50">
-                    Edit Profile
+                    プロフィールを編集
                   </h2>
                   <button
                     type="button"
@@ -352,7 +374,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-2">
-                      Display Name
+                      Display Name (表示名)
                     </label>
                     <input
                       value={displayName}
@@ -364,12 +386,12 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-2">
-                      Played Instruments (comma-separated)
+                      Played Instruments (担当パート - comma separated)
                     </label>
                     <input
                       value={playedInstruments}
                       onChange={(e) => setPlayedInstruments(e.target.value)}
-                      placeholder="例: Guitar, Vocal"
+                      placeholder="例: ギター, ボーカル（カンマ区切り）"
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
                       disabled={isSaving}
                     />
@@ -377,12 +399,12 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-2">
-                      Favorite Genres (comma-separated)
+                      Favorite Genres (好きなジャンル - comma separated)
                     </label>
                     <input
                       value={favoriteGenres}
                       onChange={(e) => setFavoriteGenres(e.target.value)}
-                      placeholder="例: Rock, J-Pop"
+                      placeholder="例: ロック, J-POP（カンマ区切り）"
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
                       disabled={isSaving}
                     />
@@ -390,12 +412,12 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-2">
-                      Top 3 Bands (comma-separated)
+                      Top 3 Bands (好きなバンドTop 3 - comma separated)
                     </label>
                     <input
                       value={top3Bands}
                       onChange={(e) => setTop3Bands(e.target.value)}
-                      placeholder="例: Band A, Band B, Band C"
+                      placeholder="例: バンドA, バンドB, バンドC（カンマ区切り）"
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
                       disabled={isSaving}
                     />
@@ -403,12 +425,12 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-2">
-                      My Gear (comma-separated)
+                      My Gear (使用機材 - comma separated)
                     </label>
                     <input
                       value={myGear}
                       onChange={(e) => setMyGear(e.target.value)}
-                      placeholder="例: Stratocaster, Amp"
+                      placeholder="例: ストラトキャスター, アンプ（カンマ区切り）"
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
                       disabled={isSaving}
                     />
@@ -416,7 +438,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-2">
-                      Recruitment Status
+                      Recruitment Status (現在募集中のバンド・パート - textarea)
                     </label>
                     <textarea
                       value={recruitmentStatus}
@@ -427,12 +449,40 @@ export default function Profile({ userId, onBack }: ProfileProps) {
                     />
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-400 mb-2">
+                      Instagram URL (インスタURL)
+                    </label>
+                    <input
+                      type="url"
+                      value={instagramUrl}
+                      onChange={(e) => setInstagramUrl(e.target.value)}
+                      placeholder="https://instagram.com/..."
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
+                      disabled={isSaving}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-400 mb-2">
+                      LINE URL (LINEリンク)
+                    </label>
+                    <input
+                      type="url"
+                      value={lineUrl}
+                      onChange={(e) => setLineUrl(e.target.value)}
+                      placeholder="https://line.me/..."
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
+                      disabled={isSaving}
+                    />
+                  </div>
+
                   <button
                     type="submit"
                     disabled={isSaving || !displayName.trim()}
                     className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
-                    {isSaving ? 'Saving...' : 'Save'}
+                    {isSaving ? '保存中...' : '保存する'}
                   </button>
                 </form>
               </div>

@@ -231,7 +231,7 @@ export default function CreatePostModal({
                       </ul>
                     )}
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </motion.div>
