@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Music2 } from 'lucide-react';
 import { createPost } from '../lib/api';
-import { supabase } from '../lib/supabase';
+import { getAuthRedirectBaseUrl, supabase } from '../lib/supabase';
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -166,6 +166,7 @@ export default function CreatePostModal({
                           provider: 'spotify',
                           options: {
                             scopes: 'user-read-recently-played',
+                            redirectTo: getAuthRedirectBaseUrl() || undefined,
                           },
                         });
                       }}
