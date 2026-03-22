@@ -26,18 +26,22 @@ export default function Login() {
     try {
       if (mode === 'signup') {
         const trimmedEmail = email.trim();
-        const { error: signUpError } = await supabase.auth.signUp({
+        const { data, error: signUpError } = await supabase.auth.signUp({
           email: trimmedEmail,
           password,
         });
 
+        console.log('Full SignUp Response:', data, signUpError);
+
+        // No `public.users` write here — nothing from the DB layer should touch this flow.
+        // Treat successful Auth response as complete success for the UI.
         if (signUpError) {
           setError(signUpError.message);
           return;
         }
 
-        // Auth only — no `public.users` write here. Profile row is created lazily in Profile.tsx.
-        setMessage('登録完了！ログインしてプロフィールを設定してください。');
+        setMessage('登録が完了しました！そのままログインしてください。');
+        setMode('signin');
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: email.trim(),
