@@ -11,6 +11,55 @@ function emailPrefix(email: string) {
   return email.slice(0, at);
 }
 
+/** Never throws. Logs failures. Only sends `id`, `email`, `display_name` — never `display_id`. */
+async function syncPublicUserRowAfterSignup(
+  userId: string,
+  trimmedEmail: string,
+  displayName: string,
+): Promise<boolean> {
+  try {
+    const minimalUserRow: {
+      id: string;
+      email: string;
+      display_name: string;
+    } = {
+      id: userId,
+      email: trimmedEmail,
+      display_name: displayName,
+    };
+
+    const { error: profileError } = await supabase
+      .from('users')
+      .upsert(minimalUserRow, { onConflict: 'id' });
+
+    if (profileError) {
+      console.error(
+        '[Login signup] public.users upsert failed (auth still OK) — full error:',
+        profileError,
+      );
+      console.error(
+        '[Login signup] details:',
+        JSON.stringify(
+          profileError,
+          ['name', 'message', 'code', 'details', 'hint'],
+          2,
+        ),
+      );
+      return false;
+    }
+    return true;
+  } catch (caught: unknown) {
+    console.error(
+      '[Login signup] public.users upsert threw (auth still OK) — full error:',
+      caught,
+    );
+    if (caught instanceof Error) {
+      console.error('[Login signup] stack:', caught.stack);
+    }
+    return false;
+  }
+}
+
 export default function Login() {
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
@@ -31,70 +80,41 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       if (mode === 'signup') {
+        const trimmedEmail = email.trim();
         const { data, error: signUpError } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: trimmedEmail,
           password,
         });
-        if (signUpError) throw signUpError;
+
+        // Auth is the source of truth for "signup succeeded". Profile sync is best-effort only.
+        if (signUpError) {
+          setError(signUpError.message);
+          return;
+        }
 
         const userId = data.user?.id;
-        if (userId) {
-          const trimmedEmail = email.trim();
-          const displayName =
-            emailPrefix(trimmedEmail) || trimmedEmail || 'User';
+        const displayName =
+          emailPrefix(trimmedEmail) || trimmedEmail || 'User';
 
-          // Minimal `public.users` row: never send `display_id` (DB default NULL).
-          // Do not send nulls for optional columns or empty strings — avoids UNIQUE('') issues.
-          try {
-            const minimalUserRow = {
-              id: userId,
-              email: trimmedEmail,
-              display_name: displayName,
-            };
-
-            const { error: profileError } = await supabase
-              .from('users')
-              .upsert(minimalUserRow, { onConflict: 'id' });
-
-            if (profileError) {
-              console.error(
-                '[Login signup] users upsert failed — full PostgREST error:',
-                profileError,
-              );
-              console.error(
-                '[Login signup] serialized:',
-                JSON.stringify(
-                  profileError,
-                  ['name', 'message', 'code', 'details', 'hint'],
-                  2,
-                ),
-              );
-              setMessage(
-                '新規登録しました。メール認証が必要な場合は受信箱を確認してください。' +
-                  ' プロフィール行の同期に失敗した場合は、ログイン後に「プロフィールを編集」から保存してください。'
-              );
-            } else {
-              setMessage(
-                '新規登録しました。メール認証が必要な場合は受信箱を確認してください。表示IDはプロフィール編集で後から設定できます。'
-              );
-            }
-          } catch (profileCatch: unknown) {
-            console.error(
-              '[Login signup] users upsert threw — full error:',
-              profileCatch,
-            );
-            if (profileCatch instanceof Error) {
-              console.error('[Login signup] stack:', profileCatch.stack);
-            }
-            setMessage(
-              '新規登録しました。メール認証が必要な場合は受信箱を確認してください。' +
-                ' プロフィールの保存で例外が発生しました。ログイン後にプロフィールを開いてください。'
-            );
-          }
-        } else {
+        if (!userId) {
           setMessage(
             '新規登録しました。メール認証が必要な場合は受信箱を確認してください。'
           );
+        } else {
+          const profileSynced = await syncPublicUserRowAfterSignup(
+            userId,
+            trimmedEmail,
+            displayName,
+          );
+          if (profileSynced) {
+            setMessage(
+              '新規登録しました。メール認証が必要な場合は受信箱を確認してください。表示IDはプロフィール編集で後から設定できます。'
+            );
+          } else {
+            setMessage(
+              'Signed up! If your profile doesn\'t load immediately, please set it up in the Profile page. ログイン後「プロフィールを編集」から保存してください。メール認証が必要な場合は受信箱を確認してください。'
+            );
+          }
         }
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
