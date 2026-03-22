@@ -40,29 +40,40 @@ export default function Login() {
         const userId = data.user?.id;
         if (userId) {
           const displayName = emailPrefix(email.trim());
-          const { error: profileError } = await supabase.from('users').upsert(
-            {
-              id: userId,
-              display_id: null,
-              display_name: displayName,
-              avatar_url: null,
-              played_instruments: null,
-              favorite_genres: null,
-              top_3_bands: null,
-              my_gear: null,
-              recruitment_status: null,
-            },
-            { onConflict: 'id' }
-          );
-          if (profileError) {
-            // Don't block auth; user can still proceed.
-            console.error('Error creating user profile', profileError);
-          }
-        }
+          // Do NOT include `display_id` in the payload: let the DB default to NULL so
+          // multiple new users don't hit UNIQUE issues (never send "" either).
+          // `display_id` can be set later on the Profile page.
+          const newUserRow = {
+            id: userId,
+            display_name: displayName,
+            avatar_url: null as string | null,
+            played_instruments: null as string[] | null,
+            favorite_genres: null as string[] | null,
+            top_3_bands: null as string[] | null,
+            my_gear: null as string[] | null,
+            recruitment_status: null as string | null,
+          };
 
-        setMessage(
-          '新規登録しました。メール認証が必要な場合は受信箱を確認してください。'
-        );
+          const { error: profileError } = await supabase
+            .from('users')
+            .upsert(newUserRow, { onConflict: 'id' });
+
+          if (profileError) {
+            console.error('Error creating user profile', profileError);
+            setMessage(
+              '新規登録しました。メール認証が必要な場合は受信箱を確認してください。' +
+                ' プロフィール行の作成に失敗した場合は、ログイン後に「プロフィールを編集」から表示IDなどを保存して同期してください。'
+            );
+          } else {
+            setMessage(
+              '新規登録しました。メール認証が必要な場合は受信箱を確認してください。表示IDはプロフィール編集で後から設定できます。'
+            );
+          }
+        } else {
+          setMessage(
+            '新規登録しました。メール認証が必要な場合は受信箱を確認してください。'
+          );
+        }
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: email.trim(),
