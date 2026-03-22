@@ -3,6 +3,7 @@ import { User, Post } from './types';
 export const users: User[] = [
   {
     id: 'user1',
+    displayId: null,
     name: 'Ken',
     avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=400',
     instruments: ['Bass'],
@@ -13,6 +14,7 @@ export const users: User[] = [
   },
   {
     id: 'user2',
+    displayId: null,
     name: 'Sho',
     avatar: 'https://images.pexels.com/photos/1516680/pexels-photo-1516680.jpeg?auto=compress&cs=tinysrgb&w=400',
     instruments: ['Guitar'],

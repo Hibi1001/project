@@ -42,11 +42,25 @@ function mapDbPostToPost(
   };
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True if `value` looks like a UUID (profile route `/user/<uuid>`). */
+export function isProfileUuid(value: string): boolean {
+  return UUID_RE.test(value.trim());
+}
+
+/** Normalize @handle or slug for `display_id` lookup (lowercase, no @). */
+export function normalizeDisplayIdLookup(raw: string): string {
+  return raw.trim().replace(/^@+/, '').toLowerCase();
+}
+
 function mapDbUserToUser(user: DbUser): User {
   return {
     id: user.id,
+    displayId: user.display_id ?? null,
     name: user.display_name,
-    avatar: user.avatar_url,
+    avatar: user.avatar_url ?? '',
     instruments: user.played_instruments ?? [],
     genres: user.favorite_genres ?? [],
     topBands: user.top_3_bands ?? [],
@@ -93,7 +107,7 @@ export async function fetchUserById(userId: string): Promise<User | null> {
   const { data, error } = await supabase
     .from('users')
     .select('*')
-    .eq('id', userId)
+    .eq('id', userId.trim())
     .maybeSingle();
 
   if (error) {
@@ -103,7 +117,43 @@ export async function fetchUserById(userId: string): Promise<User | null> {
 
   if (!data) return null;
 
-  return mapDbUserToUser(data);
+  return mapDbUserToUser(data as DbUser);
+}
+
+export async function fetchUserByDisplayId(
+  displayId: string,
+): Promise<User | null> {
+  const slug = normalizeDisplayIdLookup(displayId);
+  if (!slug) return null;
+
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('display_id', slug)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching user by display_id', error);
+    return null;
+  }
+
+  if (!data) return null;
+
+  return mapDbUserToUser(data as DbUser);
+}
+
+/**
+ * Load profile by UUID (`/user/<uuid>`) or by `display_id` (`/@handle`).
+ */
+export async function fetchUserByProfileSlug(
+  slug: string,
+): Promise<User | null> {
+  const trimmed = slug.trim();
+  if (!trimmed) return null;
+  if (isProfileUuid(trimmed)) {
+    return fetchUserById(trimmed);
+  }
+  return fetchUserByDisplayId(trimmed);
 }
 
 export async function fetchPostsByUserId(userId: string): Promise<Post[]> {

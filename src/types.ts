@@ -1,5 +1,7 @@
 export interface User {
   id: string;
+  /** Public handle (stored lowercase in DB); null until set. */
+  displayId: string | null;
   name: string;
   avatar: string;
   instruments: string[];
@@ -31,6 +33,7 @@ export type InstrumentType = 'vocal' | 'guitar' | 'bass' | 'drum' | 'keyboard';
 
 export interface DbUser {
   id: string;
+  display_id: string | null;
   display_name: string;
   avatar_url: string | null;
   played_instruments: string[] | null;

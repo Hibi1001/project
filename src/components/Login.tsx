@@ -43,6 +43,7 @@ export default function Login() {
           const { error: profileError } = await supabase.from('users').upsert(
             {
               id: userId,
+              display_id: null,
               display_name: displayName,
               avatar_url: null,
               played_instruments: null,

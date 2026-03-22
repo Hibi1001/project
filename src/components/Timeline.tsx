@@ -7,7 +7,8 @@ import { supabase } from '../lib/supabase';
 import LockScreen from './LockScreen';
 
 interface TimelineProps {
-  onViewProfile: (userId: string) => void;
+  /** UUID or `display_id` for routing (`/@handle` or `/user/uuid`). */
+  onViewProfile: (profileSlug: string) => void;
   onShareSong: () => void;
   timelineRefreshTrigger?: number;
 }
@@ -21,6 +22,7 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
   const [hasPostedToday, setHasPostedToday] = useState(false);
   const [currentUser, setCurrentUser] = useState<{
     id: string;
+    displayId: string | null;
     name: string;
     avatar: string;
   } | null>(null);
@@ -35,14 +37,6 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
     bass: Music2,
     drum: Drum,
     keyboard: Piano,
-  };
-
-  const instrumentLabels = {
-    vocal: 'Vocal',
-    guitar: 'Guitar',
-    bass: 'Bass',
-    drum: 'Drum',
-    keyboard: 'Key',
   };
 
   const refreshReactionsForPost = async (postId: string, userId: string) => {
@@ -254,6 +248,7 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
       if (!cancelled && user) {
         setCurrentUser({
           id: user.id,
+          displayId: user.displayId,
           name: user.name,
           avatar: user.avatar,
         });
@@ -433,7 +428,13 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
             <p className="text-xl text-zinc-400 mb-4">{currentPost.artist}</p>
 
             <button
-              onClick={() => onViewProfile(currentPost.userId)}
+              onClick={() =>
+                onViewProfile(
+                  currentUser.displayId?.trim()
+                    ? currentUser.displayId
+                    : currentPost.userId,
+                )
+              }
               className="inline-flex items-center gap-2 text-emerald-400 hover:text-emerald-300 transition-colors"
             >
               <img
@@ -483,7 +484,13 @@ export default function Timeline({ onViewProfile, onShareSong, timelineRefreshTr
 
           <motion.button
             whileTap={{ scale: 0.9 }}
-            onClick={() => onViewProfile(currentPost.userId)}
+            onClick={() =>
+              onViewProfile(
+                currentUser.displayId?.trim()
+                  ? currentUser.displayId
+                  : currentPost.userId,
+              )
+            }
             className="flex flex-col items-center gap-1 group mt-0 sm:mt-4"
           >
             <div className="w-12 h-12 rounded-full bg-zinc-900/80 backdrop-blur-md flex items-center justify-center group-hover:bg-emerald-500/20 group-hover:scale-110 transition-all overflow-hidden">

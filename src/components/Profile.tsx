@@ -11,7 +11,12 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Cropper, { type Area } from 'react-easy-crop';
-import { fetchUserById, fetchPostsByUserId } from '../lib/api';
+import {
+  fetchUserById,
+  fetchPostsByUserId,
+  fetchUserByProfileSlug,
+  isProfileUuid,
+} from '../lib/api';
 import type { User, Post } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -62,11 +67,20 @@ async function getCroppedImageBlob(
 }
 
 interface ProfileProps {
-  userId: string;
+  /** UUID or `display_id` (no `@` required). */
+  profileSlug: string;
   onBack: () => void;
+  /** When the loaded user has a `display_id` but the URL used UUID, update the address bar. */
+  onProfileCanonicalSlugChange?: (slug: string) => void;
 }
 
-export default function Profile({ userId, onBack }: ProfileProps) {
+const DISPLAY_ID_INPUT_RE = /^[a-zA-Z0-9]{3,30}$/;
+
+export default function Profile({
+  profileSlug,
+  onBack,
+  onProfileCanonicalSlugChange,
+}: ProfileProps) {
   const [user, setUser] = useState<User | null>(null);
   const [userPosts, setUserPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,21 +108,27 @@ export default function Profile({ userId, onBack }: ProfileProps) {
   const [recruitmentStatus, setRecruitmentStatus] = useState('');
   const [instagramUrl, setInstagramUrl] = useState('');
   const [lineUrl, setLineUrl] = useState('');
+  const [displayIdInput, setDisplayIdInput] = useState('');
   const persistedSnsRef = useRef({ instagram: '', line: '' });
 
   useEffect(() => {
     const load = async () => {
       setIsLoading(true);
-      const [userData, postsData] = await Promise.all([
-        fetchUserById(userId),
-        fetchPostsByUserId(userId),
-      ]);
+      const userData = await fetchUserByProfileSlug(profileSlug);
+      if (!userData) {
+        setUser(null);
+        setUserPosts([]);
+        setIsLoading(false);
+        return;
+      }
+      const uid = userData.id;
+      const postsData = await fetchPostsByUserId(uid);
       setUser(userData);
       setUserPosts(postsData);
       const { data: snsRow } = await supabase
         .from('users')
         .select('instagram_url, line_url')
-        .eq('id', userId)
+        .eq('id', uid)
         .maybeSingle();
       const ig = (snsRow as { instagram_url?: string | null } | null)?.instagram_url ?? '';
       const ln = (snsRow as { line_url?: string | null } | null)?.line_url ?? '';
@@ -119,7 +139,19 @@ export default function Profile({ userId, onBack }: ProfileProps) {
     };
 
     load();
-  }, [userId]);
+  }, [profileSlug]);
+
+  useEffect(() => {
+    if (!user?.displayId) return;
+    if (!isProfileUuid(profileSlug)) return;
+    if (profileSlug !== user.id) return;
+    onProfileCanonicalSlugChange?.(user.displayId);
+  }, [
+    user?.id,
+    user?.displayId,
+    profileSlug,
+    onProfileCanonicalSlugChange,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,7 +180,9 @@ export default function Profile({ userId, onBack }: ProfileProps) {
     };
   }, []);
 
-  const isOwnProfile = authUserId === userId;
+  const isOwnProfile = Boolean(
+    authUserId && user && authUserId === user.id,
+  );
 
   const onAvatarCropComplete = useCallback(
     (_area: Area, areaPixels: Area) => {
@@ -176,6 +210,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
     setRecruitmentStatus(user.recruitment ?? '');
     setInstagramUrl(persistedSnsRef.current.instagram);
     setLineUrl(persistedSnsRef.current.line);
+    setDisplayIdInput(user.displayId ?? '');
     setIsEditOpen(true);
   };
 
@@ -201,7 +236,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
   };
 
   const uploadCroppedAvatar = async (blob: Blob) => {
-    if (!authUserId || authUserId !== userId) return;
+    if (!authUserId || !user || authUserId !== user.id) return;
 
     const objectPath = `${authUserId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.jpg`;
 
@@ -232,14 +267,15 @@ export default function Profile({ userId, onBack }: ProfileProps) {
       return;
     }
 
-    const refreshed = await fetchUserById(userId);
+    const refreshed = await fetchUserById(user.id);
     setUser(refreshed);
   };
 
   const handleConfirmAvatarCrop = async () => {
     const src = avatarCropImageSrc;
     const pixels = croppedAreaPixelsRef.current;
-    if (!src || !pixels || !authUserId || authUserId !== userId) return;
+    if (!src || !pixels || !authUserId || !user || authUserId !== user.id)
+      return;
 
     setAvatarUploading(true);
     setAvatarUploadError(null);
@@ -282,7 +318,7 @@ export default function Profile({ userId, onBack }: ProfileProps) {
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !authUserId || authUserId !== userId) return;
+    if (!file || !authUserId || !user || authUserId !== user.id) return;
     if (!file.type.startsWith('image/')) {
       setAvatarUploadError('画像ファイルを選択してください。');
       return;
@@ -305,13 +341,27 @@ export default function Profile({ userId, onBack }: ProfileProps) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUserId || authUserId !== userId) return;
+    if (!authUserId || !user || authUserId !== user.id) return;
     setIsSaving(true);
     setSaveError(null);
+
+    const rawDisplayId = displayIdInput.trim();
+    let displayIdForDb: string | null = null;
+    if (rawDisplayId) {
+      if (!DISPLAY_ID_INPUT_RE.test(rawDisplayId)) {
+        setSaveError(
+          '表示IDは3〜30文字の半角英数字のみ使用できます（空欄で未設定に戻せます）。',
+        );
+        setIsSaving(false);
+        return;
+      }
+      displayIdForDb = rawDisplayId.toLowerCase();
+    }
 
     const { error } = await supabase
       .from('users')
       .update({
+        display_id: displayIdForDb,
         display_name: displayName.trim(),
         played_instruments: toStringArray(playedInstruments),
         favorite_genres: toStringArray(favoriteGenres),
@@ -324,18 +374,27 @@ export default function Profile({ userId, onBack }: ProfileProps) {
       .eq('id', authUserId);
 
     if (error) {
-      setSaveError(error.message);
+      const code = (error as { code?: string }).code;
+      if (code === '23505') {
+        setSaveError('この表示IDは既に使われています。別のIDを試してください。');
+      } else {
+        setSaveError(error.message);
+      }
       setIsSaving(false);
       return;
     }
 
-    const refreshed = await fetchUserById(userId);
+    const refreshed = await fetchUserById(user.id);
     setUser(refreshed);
     const igSaved = instagramUrl.trim();
     const lineSaved = lineUrl.trim();
     persistedSnsRef.current = { instagram: igSaved, line: lineSaved };
     setInstagramUrl(igSaved);
     setLineUrl(lineSaved);
+    setDisplayIdInput(refreshed?.displayId ?? '');
+    if (refreshed) {
+      onProfileCanonicalSlugChange?.(refreshed.displayId ?? refreshed.id);
+    }
     setIsSaving(false);
     setIsEditOpen(false);
   };
@@ -348,7 +407,22 @@ export default function Profile({ userId, onBack }: ProfileProps) {
     );
   }
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <div className="fixed inset-0 bg-zinc-950 flex flex-col items-center justify-center gap-4 px-6">
+        <p className="text-zinc-400 text-sm text-center">
+          プロフィールが見つかりません。
+        </p>
+        <button
+          type="button"
+          onClick={onBack}
+          className="px-6 py-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm font-semibold hover:bg-zinc-700 transition-colors"
+        >
+          戻る
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-zinc-950 overflow-y-auto">
@@ -673,6 +747,32 @@ export default function Profile({ userId, onBack }: ProfileProps) {
                       disabled={isSaving}
                     />
                   </div>
+
+                  {isOwnProfile && (
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-400 mb-1">
+                        表示ID（プロフィールURL用）
+                      </label>
+                      <p className="text-xs text-zinc-500 mb-2">
+                        ※3〜30文字の半角英数字のみ。@は付けずに入力してください。空欄で未設定に戻せます。
+                      </p>
+                      <input
+                        value={displayIdInput}
+                        onChange={(e) =>
+                          setDisplayIdInput(
+                            e.target.value
+                              .replace(/[^a-zA-Z0-9]/g, '')
+                              .slice(0, 30),
+                          )
+                        }
+                        placeholder="例: myname2024"
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
+                        disabled={isSaving}
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-1">

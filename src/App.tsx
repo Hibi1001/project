@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import LockScreen from './components/LockScreen';
 import Timeline from './components/Timeline';
@@ -6,9 +6,27 @@ import Profile from './components/Profile';
 import CreatePostModal from './components/CreatePostModal';
 import Login from './components/Login';
 import { supabase } from './lib/supabase';
+import { isProfileUuid } from './lib/api';
 import type { Session } from '@supabase/supabase-js';
 
 type Screen = 'lock' | 'timeline' | 'profile';
+
+function formatProfilePath(slug: string): string {
+  const s = slug.trim();
+  if (!s) return '/';
+  if (isProfileUuid(s)) return `/user/${s}`;
+  return `/@${encodeURIComponent(s)}`;
+}
+
+function parseProfilePath(pathname: string): string | null {
+  const p = (pathname || '/').replace(/\/$/, '') || '/';
+  if (p === '/' || p === '') return null;
+  const at = p.match(/^\/@([^/]+)$/);
+  if (at) return decodeURIComponent(at[1]);
+  const userSeg = p.match(/^\/user\/([^/]+)$/i);
+  if (userSeg) return userSeg[1];
+  return null;
+}
 
 interface PasscodeFormProps {
   onSuccess: () => void;
@@ -64,9 +82,11 @@ function App() {
     const current = window.localStorage.getItem('isPasscodeValid') === 'true';
     return legacy || current;
   });
-  const [hasPostedToday, setHasPostedToday] = useState(false);
   const [currentScreen, setCurrentScreen] = useState<Screen>('lock');
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  /** UUID or `display_id` slug (no leading @). */
+  const [selectedProfileSlug, setSelectedProfileSlug] = useState<string | null>(
+    null,
+  );
   const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
 
@@ -95,27 +115,70 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!authReady) return;
+    const uid = session?.user?.id;
+    if (!uid || !passcodeOk) return;
+    const slug = parseProfilePath(
+      typeof window !== 'undefined' ? window.location.pathname : '/',
+    );
+    if (slug) {
+      setSelectedProfileSlug(slug);
+      setCurrentScreen('profile');
+    }
+  }, [authReady, session?.user?.id, passcodeOk]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const slug = parseProfilePath(window.location.pathname);
+      if (slug) {
+        setSelectedProfileSlug(slug);
+        setCurrentScreen('profile');
+      } else {
+        setSelectedProfileSlug(null);
+        setCurrentScreen('timeline');
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   const handleUnlock = () => {
-    setHasPostedToday(true);
     setCurrentScreen('timeline');
   };
 
   const handleCreatePostSuccess = () => {
-    setHasPostedToday(true);
     setCreatePostModalOpen(false);
     setTimelineRefreshTrigger((t) => t + 1);
     setCurrentScreen('timeline');
   };
 
-  const handleViewProfile = (userId: string) => {
-    setSelectedUserId(userId);
+  const handleViewProfile = (profileSlug: string) => {
+    const slug = profileSlug.trim();
+    if (!slug) return;
+    setSelectedProfileSlug(slug);
     setCurrentScreen('profile');
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', formatProfilePath(slug));
+    }
   };
 
   const handleBackToTimeline = () => {
     setCurrentScreen('timeline');
-    setSelectedUserId(null);
+    setSelectedProfileSlug(null);
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', '/');
+    }
   };
+
+  const handleProfileCanonicalSlugChange = useCallback((slug: string) => {
+    const s = slug.trim();
+    if (!s) return;
+    setSelectedProfileSlug(s);
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', formatProfilePath(s));
+    }
+  }, []);
 
   const handlePasscodeSuccess = () => {
     setPasscodeOk(true);
@@ -177,11 +240,12 @@ function App() {
             timelineRefreshTrigger={timelineRefreshTrigger}
           />
         )}
-        {currentScreen === 'profile' && selectedUserId && (
+        {currentScreen === 'profile' && selectedProfileSlug && (
           <Profile
-            key="profile"
-            userId={selectedUserId}
+            key={selectedProfileSlug}
+            profileSlug={selectedProfileSlug}
             onBack={handleBackToTimeline}
+            onProfileCanonicalSlugChange={handleProfileCanonicalSlugChange}
           />
         )}
       </AnimatePresence>
