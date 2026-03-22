@@ -257,8 +257,9 @@ export async function fetchPostsByUserId(userId: string): Promise<Post[]> {
   );
 }
 
-/** 12 hours between shares per user (based on `posts.created_at`). */
-export const SHARE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+/** 開発テスト用：制限なし */
+export const SHARE_COOLDOWN_MS = 0;
+// export const SHARE_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 本番用はコメントアウトして残しておく
 
 /** Latest `posts.created_at` ISO string for this user, or null if no posts. */
 export async function fetchLatestPostCreatedAtForUser(
