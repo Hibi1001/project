@@ -69,10 +69,16 @@ function mapDbUserToUser(user: DbUser): User {
   };
 }
 
+const TIMELINE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Global timeline: posts from the last 24 hours only (Profile uses its own 7-day window). */
 export async function fetchTimelinePosts(): Promise<Post[]> {
+  const sinceIso = new Date(Date.now() - TIMELINE_WINDOW_MS).toISOString();
+
   const { data: postsData, error } = await supabase
     .from('posts')
     .select('*')
+    .gte('created_at', sinceIso)
     .order('created_at', { ascending: false });
 
   if (error) {

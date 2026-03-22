@@ -401,7 +401,7 @@ export default function Timeline({
           className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
         >
         <div className="text-zinc-400 text-sm text-center max-w-xs">
-          No posts yet. Share your first track!
+          24時間以内のシェアはまだありません。あなたが最初の1曲をシェアしませんか？
           {shareSongDisabled && shareCooldownText ? (
             <span className="block mt-3 text-xs text-amber-400/90">
               {shareCooldownText}
