@@ -5,61 +5,6 @@ import { supabase } from '../lib/supabase';
 
 type Mode = 'signin' | 'signup';
 
-function emailPrefix(email: string) {
-  const at = email.indexOf('@');
-  if (at <= 0) return email;
-  return email.slice(0, at);
-}
-
-/** Never throws. Logs failures. Only sends `id`, `email`, `display_name` — never `display_id`. */
-async function syncPublicUserRowAfterSignup(
-  userId: string,
-  trimmedEmail: string,
-  displayName: string,
-): Promise<boolean> {
-  try {
-    const minimalUserRow: {
-      id: string;
-      email: string;
-      display_name: string;
-    } = {
-      id: userId,
-      email: trimmedEmail,
-      display_name: displayName,
-    };
-
-    const { error: profileError } = await supabase
-      .from('users')
-      .upsert(minimalUserRow, { onConflict: 'id' });
-
-    if (profileError) {
-      console.error(
-        '[Login signup] public.users upsert failed (auth still OK) — full error:',
-        profileError,
-      );
-      console.error(
-        '[Login signup] details:',
-        JSON.stringify(
-          profileError,
-          ['name', 'message', 'code', 'details', 'hint'],
-          2,
-        ),
-      );
-      return false;
-    }
-    return true;
-  } catch (caught: unknown) {
-    console.error(
-      '[Login signup] public.users upsert threw (auth still OK) — full error:',
-      caught,
-    );
-    if (caught instanceof Error) {
-      console.error('[Login signup] stack:', caught.stack);
-    }
-    return false;
-  }
-}
-
 export default function Login() {
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
@@ -81,41 +26,18 @@ export default function Login() {
     try {
       if (mode === 'signup') {
         const trimmedEmail = email.trim();
-        const { data, error: signUpError } = await supabase.auth.signUp({
+        const { error: signUpError } = await supabase.auth.signUp({
           email: trimmedEmail,
           password,
         });
 
-        // Auth is the source of truth for "signup succeeded". Profile sync is best-effort only.
         if (signUpError) {
           setError(signUpError.message);
           return;
         }
 
-        const userId = data.user?.id;
-        const displayName =
-          emailPrefix(trimmedEmail) || trimmedEmail || 'User';
-
-        if (!userId) {
-          setMessage(
-            '新規登録しました。メール認証が必要な場合は受信箱を確認してください。'
-          );
-        } else {
-          const profileSynced = await syncPublicUserRowAfterSignup(
-            userId,
-            trimmedEmail,
-            displayName,
-          );
-          if (profileSynced) {
-            setMessage(
-              '新規登録しました。メール認証が必要な場合は受信箱を確認してください。表示IDはプロフィール編集で後から設定できます。'
-            );
-          } else {
-            setMessage(
-              'Signed up! If your profile doesn\'t load immediately, please set it up in the Profile page. ログイン後「プロフィールを編集」から保存してください。メール認証が必要な場合は受信箱を確認してください。'
-            );
-          }
-        }
+        // Auth only — no `public.users` write here. Profile row is created lazily in Profile.tsx.
+        setMessage('登録完了！ログインしてプロフィールを設定してください。');
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: email.trim(),

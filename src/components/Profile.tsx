@@ -130,7 +130,45 @@ export default function Profile({
   useEffect(() => {
     const load = async () => {
       setIsLoading(true);
-      const userData = await fetchUserByProfileSlug(profileSlug);
+      const slug = profileSlug.trim();
+
+      let userData = await fetchUserByProfileSlug(slug);
+
+      const { data: authData, error: authUserError } =
+        await supabase.auth.getUser();
+      const authedUser = authUserError ? null : authData.user;
+      const authedId = authedUser?.id;
+
+      const isOwnUuidRoute =
+        Boolean(authedId) && isProfileUuid(slug) && authedId === slug;
+
+      // Lazy-create `public.users` on first visit to own profile (no row at signup).
+      if (!userData && isOwnUuidRoute && authedUser && authedId) {
+        const email = authedUser.email ?? '';
+        const displayName =
+          (email.includes('@')
+            ? email.slice(0, email.indexOf('@')).trim()
+            : '') ||
+          email ||
+          'User';
+
+        const { error: insertErr } = await supabase.from('users').insert({
+          id: authedId,
+          display_name: displayName,
+        });
+
+        if (insertErr) {
+          if (insertErr.code !== '23505') {
+            console.error(
+              '[Profile] lazy users row insert failed:',
+              insertErr,
+            );
+          }
+        }
+
+        userData = await fetchUserByProfileSlug(slug);
+      }
+
       if (!userData) {
         setUser(null);
         setUserPosts([]);
