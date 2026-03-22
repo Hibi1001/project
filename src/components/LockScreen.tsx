@@ -1,15 +1,19 @@
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Music, Lock, Plus } from 'lucide-react';
 
 interface LockScreenProps {
+  /** Primary action: App = go to timeline; Timeline (can post) = open share modal. */
   onUnlock: () => void;
   onShareSong: () => void;
-  /** True when 12h cooldown is active — disables Share Song (and optionally main CTA). */
+  /** True during 12h cooldown — secondary share is disabled. */
   shareSongDisabled?: boolean;
   /** e.g. 「次のシェアまであと ○時間○分」 */
   shareCooldownText?: string;
-  /** When both CTAs open the share modal, disable both during cooldown. */
-  disableMainCtaWhenShareCooldown?: boolean;
+  /**
+   * Timeline only: when set and `shareSongDisabled`, the main CTA becomes
+   * 「タイムラインを見る」 with subtle styling instead of opening share.
+   */
+  onViewTimelineWhenCooldown?: () => void;
 }
 
 export default function LockScreen({
@@ -17,10 +21,16 @@ export default function LockScreen({
   onShareSong,
   shareSongDisabled = false,
   shareCooldownText = '',
-  disableMainCtaWhenShareCooldown = false,
+  onViewTimelineWhenCooldown,
 }: LockScreenProps) {
-  const mainDisabled =
-    shareSongDisabled && Boolean(disableMainCtaWhenShareCooldown);
+  const useCooldownTimelineMain =
+    Boolean(shareSongDisabled && onViewTimelineWhenCooldown);
+
+  const showTopCooldownNotice =
+    shareSongDisabled &&
+    shareCooldownText &&
+    !useCooldownTimelineMain;
+
   return (
     <div className="fixed inset-0 bg-zinc-950 flex items-center justify-center overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-950 to-black opacity-90" />
@@ -28,7 +38,8 @@ export default function LockScreen({
       <div
         className="absolute inset-0 opacity-5"
         style={{
-          backgroundImage: 'url(https://images.pexels.com/photos/1763075/pexels-photo-1763075.jpeg?auto=compress&cs=tinysrgb&w=1200)',
+          backgroundImage:
+            'url(https://images.pexels.com/photos/1763075/pexels-photo-1763075.jpeg?auto=compress&cs=tinysrgb&w=1200)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           filter: 'blur(20px)',
@@ -47,7 +58,7 @@ export default function LockScreen({
           transition={{
             duration: 2,
             repeat: Infinity,
-            ease: "easeInOut"
+            ease: 'easeInOut',
           }}
           className="mb-8 flex justify-center"
         >
@@ -66,7 +77,7 @@ export default function LockScreen({
           仲間とシェアしてタイムラインをアンロック
         </p>
 
-        {shareSongDisabled && shareCooldownText ? (
+        {showTopCooldownNotice ? (
           <div className="mb-6 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-left">
             <p className="text-xs font-semibold text-amber-200/95 mb-1">
               シェアの間隔制限（12時間）
@@ -80,29 +91,78 @@ export default function LockScreen({
           </div>
         ) : null}
 
-        <motion.button
-          whileHover={mainDisabled ? {} : { scale: 1.05 }}
-          whileTap={mainDisabled ? {} : { scale: 0.95 }}
-          onClick={mainDisabled ? undefined : onUnlock}
-          disabled={mainDisabled}
-          className={`w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold py-4 px-8 rounded-full shadow-lg shadow-emerald-500/30 transition-shadow ${
-            mainDisabled
-              ? 'opacity-40 cursor-not-allowed pointer-events-none'
-              : 'hover:shadow-emerald-500/50'
-          }`}
-        >
-          今日の1曲をシェアして<br />タイムラインをアンロック
-        </motion.button>
+        <div className="w-full">
+          <AnimatePresence mode="wait" initial={false}>
+            {useCooldownTimelineMain ? (
+              <motion.div
+                key="timeline-view"
+                layout
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                className="w-full"
+              >
+                <motion.button
+                  type="button"
+                  layout
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={onViewTimelineWhenCooldown}
+                  className="w-full rounded-full border border-zinc-600/80 bg-zinc-800/40 backdrop-blur-md text-zinc-100 font-semibold py-4 px-8 shadow-inner shadow-black/20 hover:bg-zinc-800/60 hover:border-zinc-500/70 transition-colors"
+                >
+                  <span className="block text-base leading-snug">
+                    タイムラインを見る
+                  </span>
+                  <span className="block text-xs font-normal text-zinc-400 mt-1">
+                    みんなの音楽をチェック
+                  </span>
+                </motion.button>
+                {shareCooldownText ? (
+                  <p className="text-sm text-amber-300/95 font-medium mt-3 tabular-nums leading-snug">
+                    {shareCooldownText}
+                  </p>
+                ) : null}
+                <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
+                  次のシェアは上記の時刻以降に「曲をシェア」からどうぞ
+                </p>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="share-unlock"
+                layout
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                className="w-full"
+              >
+                <motion.button
+                  type="button"
+                  layout
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={onUnlock}
+                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold py-4 px-8 rounded-full shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-shadow"
+                >
+                  今日の1曲をシェアして
+                  <br />
+                  タイムラインをアンロック
+                </motion.button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         <motion.button
           whileHover={shareSongDisabled ? {} : { scale: 1.02 }}
           whileTap={shareSongDisabled ? {} : { scale: 0.98 }}
           onClick={shareSongDisabled ? undefined : onShareSong}
           disabled={shareSongDisabled}
-          className={`mt-4 w-full flex items-center justify-center gap-2 py-3 px-6 rounded-full border border-zinc-600 transition-colors ${
+          className={`mt-4 w-full flex items-center justify-center gap-2 py-3 px-6 rounded-full border transition-colors ${
             shareSongDisabled
               ? 'text-zinc-500 border-zinc-700 cursor-not-allowed opacity-60 pointer-events-none'
-              : 'text-zinc-300 hover:bg-zinc-800/50 hover:text-zinc-50'
+              : 'text-zinc-300 border-zinc-600 hover:bg-zinc-800/50 hover:text-zinc-50'
           }`}
         >
           <Plus className="w-5 h-5" />
@@ -111,7 +171,9 @@ export default function LockScreen({
 
         <p className="text-zinc-600 text-xs mt-6">
           {shareSongDisabled
-            ? 'クールダウン中は上記の時刻までシェアできません'
+            ? useCooldownTimelineMain
+              ? 'シェアのクールダウン中です（上のボタンでタイムラインのみ閲覧できます）'
+              : 'クールダウン中は上記の時刻までシェアできません'
             : '曲をシェアから今日の1曲を投稿できます'}
         </p>
       </motion.div>

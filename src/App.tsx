@@ -275,7 +275,6 @@ function App() {
             onShareSong={() => setCreatePostModalOpen(true)}
             shareSongDisabled={shareSongBlocked}
             shareCooldownText={shareCooldownLabelJa}
-            disableMainCtaWhenShareCooldown={false}
           />
         )}
         {currentScreen === 'timeline' && (

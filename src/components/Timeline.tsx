@@ -28,6 +28,9 @@ export default function Timeline({
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [hasPostedToday, setHasPostedToday] = useState(false);
+  /** Lets users browse the timeline during 12h cooldown without posting today (calendar day). */
+  const [viewTimelineWithoutPostToday, setViewTimelineWithoutPostToday] =
+    useState(false);
   const [currentUser, setCurrentUser] = useState<{
     id: string;
     displayId: string | null;
@@ -204,6 +207,10 @@ export default function Timeline({
   }, [authUserId, timelineRefreshTrigger]);
 
   useEffect(() => {
+    if (hasPostedToday) setViewTimelineWithoutPostToday(false);
+  }, [hasPostedToday]);
+
+  useEffect(() => {
     const loadPosts = async () => {
       setIsLoading(true);
       const data = await fetchTimelinePosts();
@@ -297,10 +304,17 @@ export default function Timeline({
     );
   }
 
-  if (!hasPostedToday) {
-    // We reuse the existing LockScreen UI to keep layout/styling consistent.
-    // The main CTA opens the Share Song modal (since unlock requires posting today).
-    return <LockScreen onUnlock={onShareSong} onShareSong={onShareSong} />;
+  if (!hasPostedToday && !viewTimelineWithoutPostToday) {
+    // Main CTA opens share when allowed; during 12h cooldown it switches to "view timeline".
+    return (
+      <LockScreen
+        onUnlock={onShareSong}
+        onShareSong={onShareSong}
+        shareSongDisabled={shareSongDisabled}
+        shareCooldownText={shareCooldownText}
+        onViewTimelineWhenCooldown={() => setViewTimelineWithoutPostToday(true)}
+      />
+    );
   }
 
   if (isLoading) {
