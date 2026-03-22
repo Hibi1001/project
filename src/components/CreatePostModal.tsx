@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Music2 } from 'lucide-react';
 import {
   createPost,
+  fetchItunesPreviewForSpotifyTrack,
   fetchLatestPostCreatedAtForUser,
   formatShareCooldownJa,
   getShareCooldownFromLatestPost,
@@ -111,11 +112,21 @@ export default function CreatePostModal({
         return;
       }
 
+      // Spotify Web API often omits preview_url now — fill from iTunes silently when missing.
+      let previewUrl =
+        track.previewUrl?.trim() ? track.previewUrl.trim() : null;
+      if (!previewUrl) {
+        previewUrl = await fetchItunesPreviewForSpotifyTrack(
+          track.name,
+          track.artist,
+        );
+      }
+
       await createPost({
         userId,
         trackName: track.name,
         artistName: track.artist,
-        previewUrl: track.previewUrl,
+        previewUrl,
         coverUrl: track.albumArt,
         caption: caption.trim() || null,
       });

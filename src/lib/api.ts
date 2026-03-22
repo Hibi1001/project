@@ -437,3 +437,23 @@ export async function searchiTunesSongs(query: string): Promise<iTunesSongResult
     }));
 }
 
+/**
+ * When Spotify no longer returns `preview_url`, look up a 30s preview on iTunes
+ * using the same track/artist labels (Spotify metadata stays authoritative for the post).
+ * Fails silently — returns null if no match or on network error.
+ */
+export async function fetchItunesPreviewForSpotifyTrack(
+  trackName: string,
+  artistName: string,
+): Promise<string | null> {
+  const q = `${trackName} ${artistName}`.trim();
+  if (!q) return null;
+  try {
+    const hits = await searchiTunesSongs(q);
+    const first = hits[0];
+    return first?.previewUrl?.trim() ? first.previewUrl : null;
+  } catch {
+    return null;
+  }
+}
+
