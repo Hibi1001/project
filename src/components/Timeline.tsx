@@ -4,6 +4,7 @@ import { Mic, Guitar, Music2, Drum, Piano, Plus, Play, Pause } from 'lucide-reac
 import { Post, InstrumentType } from '../types';
 import { fetchTimelinePosts, fetchUserById } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
 
 interface TimelineProps {
@@ -31,6 +32,8 @@ export default function Timeline({
   /** Lets users browse the timeline during 12h cooldown without posting today (calendar day). */
   const [viewTimelineWithoutPostToday, setViewTimelineWithoutPostToday] =
     useState(false);
+  const [seedRefreshNonce, setSeedRefreshNonce] = useState(0);
+  const [isSeeding, setIsSeeding] = useState(false);
   const [currentUser, setCurrentUser] = useState<{
     id: string;
     displayId: string | null;
@@ -226,7 +229,40 @@ export default function Timeline({
     };
 
     loadPosts();
-  }, [timelineRefreshTrigger]);
+  }, [timelineRefreshTrigger, seedRefreshNonce]);
+
+  const handleSeedTestData = async () => {
+    setIsSeeding(true);
+    try {
+      const result = await seedTimelineTestData();
+      if (!result.ok) {
+        console.error('Seed test data failed:', result.error);
+        window.alert(
+          `Seed failed (check RLS / FK policies): ${result.error ?? 'unknown error'}`,
+        );
+        return;
+      }
+      // Jump to timeline in dev so you can browse dummy posts without posting today.
+      if (import.meta.env.DEV) {
+        setViewTimelineWithoutPostToday(true);
+      }
+      setSeedRefreshNonce((n) => n + 1);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  const devSeedButton =
+    import.meta.env.DEV ? (
+      <button
+        type="button"
+        onClick={handleSeedTestData}
+        disabled={isSeeding}
+        className="fixed top-3 left-3 z-[100] rounded-lg border border-amber-500/50 bg-amber-950/90 px-3 py-1.5 text-xs font-semibold text-amber-200 shadow-lg backdrop-blur-sm hover:bg-amber-900/90 disabled:opacity-60"
+      >
+        {isSeeding ? 'Seeding…' : 'Seed Test Data'}
+      </button>
+    ) : null;
 
   useEffect(() => {
     const handleScroll = (e: WheelEvent) => {
@@ -295,36 +331,44 @@ export default function Timeline({
 
   if (isAuthLoading) {
     return (
-      <div
-        ref={containerRef}
-        className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
-      >
-        <div className="text-zinc-400 text-sm">Loading timeline...</div>
-      </div>
+      <>
+        {devSeedButton}
+        <div
+          ref={containerRef}
+          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
+        >
+          <div className="text-zinc-400 text-sm">Loading timeline...</div>
+        </div>
+      </>
     );
   }
 
   if (!hasPostedToday && !viewTimelineWithoutPostToday) {
     // Main CTA opens share when allowed; during 12h cooldown it switches to "view timeline".
     return (
-      <LockScreen
-        onUnlock={onShareSong}
-        onShareSong={onShareSong}
-        shareSongDisabled={shareSongDisabled}
-        shareCooldownText={shareCooldownText}
-        onViewTimelineWhenCooldown={() => setViewTimelineWithoutPostToday(true)}
-      />
+      <>
+        {devSeedButton}
+        <LockScreen
+          onUnlock={onShareSong}
+          onShareSong={onShareSong}
+          shareSongDisabled={shareSongDisabled}
+          shareCooldownText={shareCooldownText}
+          onViewTimelineWhenCooldown={() => setViewTimelineWithoutPostToday(true)}
+        />
+      </>
     );
   }
 
   if (isLoading) {
     return (
-      <div
-        ref={containerRef}
-        className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
-      >
-        <div className="text-zinc-400 text-sm">Loading timeline...</div>
-        <motion.button
+      <>
+        {devSeedButton}
+        <div
+          ref={containerRef}
+          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
+        >
+          <div className="text-zinc-400 text-sm">Loading timeline...</div>
+          <motion.button
           whileHover={shareSongDisabled ? {} : { scale: 1.05 }}
           whileTap={shareSongDisabled ? {} : { scale: 0.95 }}
           onClick={shareSongDisabled ? undefined : onShareSong}
@@ -343,16 +387,19 @@ export default function Timeline({
         >
           <Plus className="w-6 h-6" />
         </motion.button>
-      </div>
+        </div>
+      </>
     );
   }
 
   if (!posts.length) {
     return (
-      <div
-        ref={containerRef}
-        className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
-      >
+      <>
+        {devSeedButton}
+        <div
+          ref={containerRef}
+          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
+        >
         <div className="text-zinc-400 text-sm text-center max-w-xs">
           No posts yet. Share your first track!
           {shareSongDisabled && shareCooldownText ? (
@@ -380,7 +427,8 @@ export default function Timeline({
         >
           <Plus className="w-6 h-6" />
         </motion.button>
-      </div>
+        </div>
+      </>
     );
   }
 
@@ -388,7 +436,17 @@ export default function Timeline({
   const hasPreview = Boolean(currentPost.previewUrl);
 
   if (!currentUser) {
-    return null;
+    return (
+      <>
+        {devSeedButton}
+        <div
+          ref={containerRef}
+          className="fixed inset-0 bg-zinc-950 flex items-center justify-center"
+        >
+          <div className="text-zinc-400 text-sm">Loading profile…</div>
+        </div>
+      </>
+    );
   }
 
   const togglePlayPause = () => {
@@ -405,10 +463,12 @@ export default function Timeline({
   const handleAudioEnded = () => setIsPlaying(false);
 
   return (
-    <div
-      ref={containerRef}
-      className="fixed inset-0 bg-zinc-950 overflow-hidden"
-    >
+    <>
+      {devSeedButton}
+      <div
+        ref={containerRef}
+        className="fixed inset-0 bg-zinc-950 overflow-hidden"
+      >
       {hasPreview && (
         <audio
           key={`audio-${currentPost.id}`}
@@ -550,7 +610,8 @@ export default function Timeline({
           </motion.button>
         </div>
       </motion.div>
-    </div>
+      </div>
+    </>
   );
 }
 
