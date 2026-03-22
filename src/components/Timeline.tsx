@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   Mic,
@@ -21,7 +22,10 @@ import { supabase } from '../lib/supabase';
 import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
 import PostReplySheet from './PostReplySheet';
-import SpotifyPlayer, { PREVIEW_UI_DURATION_SEC } from './SpotifyPlayer';
+import SpotifyPlayer, {
+  PREVIEW_UI_DURATION_SEC,
+  type SpotifyPlayerHandle,
+} from './SpotifyPlayer';
 
 interface TimelineProps {
   /** UUID or `display_id` for routing (`/@handle` or `/user/uuid`). */
@@ -45,9 +49,12 @@ export default function Timeline({
   /** Debounced + “locked” for audio/reactions; immediate on play tap. */
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const scrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevActivePostIdRef = useRef<string | null>(null);
+  /** Last “stable” active post after scroll debounce (for pause-on-scroll only). */
+  const prevStableActiveRef = useRef<string | null>(null);
+  const activePostIdRef = useRef<string | null>(null);
   /** When true, active id changed from an explicit play tap — don’t force pause. */
   const skipPlayingResetRef = useRef(false);
+  const spotifyPlayerRef = useRef<SpotifyPlayerHandle>(null);
   const [usersById, setUsersById] = useState<Record<string, User>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -79,6 +86,8 @@ export default function Timeline({
   const activePost =
     posts.find((p) => p.id === activePostId) ?? posts[0] ?? null;
 
+  activePostIdRef.current = activePostId;
+
   const scheduleActiveFromScroll = useCallback((postId: string) => {
     setIoPostId(postId);
     if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
@@ -96,6 +105,17 @@ export default function Timeline({
     skipPlayingResetRef.current = true;
     setIoPostId(postId);
     setActivePostId(postId);
+  }, []);
+
+  /** Double rAF after flushSync keeps `unlockAndPlay` near the user gesture for autoplay policy. */
+  const tryUnlockPlayFromGesture = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void spotifyPlayerRef.current?.unlockAndPlay().catch(() => {
+          setIsPlaying(false);
+        });
+      });
+    });
   }, []);
 
   const syncReplyCount = useCallback(async (postId: string) => {
@@ -301,6 +321,7 @@ export default function Timeline({
       const firstId = deduped[0]?.id ?? null;
       setIoPostId(firstId);
       setActivePostId(firstId);
+      prevStableActiveRef.current = firstId;
       if (scrollDebounceRef.current) {
         clearTimeout(scrollDebounceRef.current);
         scrollDebounceRef.current = null;
@@ -341,24 +362,45 @@ export default function Timeline({
     }
   }, [posts, activePostId]);
 
+  // Only stop playback after activePostId has stayed the same for a short window (ignore scroll jitter).
   useEffect(() => {
-    if (prevActivePostIdRef.current === activePostId) return;
-    prevActivePostIdRef.current = activePostId;
     if (skipPlayingResetRef.current) {
       skipPlayingResetRef.current = false;
       setPreviewProgress(0);
+      prevStableActiveRef.current = activePostId;
       return;
     }
-    setIsPlaying(false);
-    setPreviewProgress(0);
+
+    if (prevStableActiveRef.current === null && activePostId) {
+      prevStableActiveRef.current = activePostId;
+      return;
+    }
+
+    if (prevStableActiveRef.current === activePostId) return;
+
+    const targetId = activePostId;
+    const fromId = prevStableActiveRef.current;
+
+    const timer = window.setTimeout(() => {
+      if (activePostIdRef.current !== targetId) return;
+      prevStableActiveRef.current = targetId;
+      if (fromId !== targetId) {
+        setIsPlaying(false);
+        setPreviewProgress(0);
+      }
+    }, 520);
+
+    return () => clearTimeout(timer);
   }, [activePostId]);
 
   useEffect(() => {
-    if (!activePost?.previewUrl) {
+    if (!activePostId) return;
+    const p = posts.find((x) => x.id === activePostId);
+    if (p && !p.previewUrl?.trim()) {
       setIsPlaying(false);
       setPreviewProgress(0);
     }
-  }, [activePost?.id, activePost?.previewUrl]);
+  }, [activePostId, posts]);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -530,16 +572,20 @@ export default function Timeline({
       return;
     }
     if (post.id === activePostId && !isPlaying) {
-      setIsPlaying(true);
+      flushSync(() => setIsPlaying(true));
+      tryUnlockPlayFromGesture();
       return;
     }
-    setActiveImmediate(post.id);
+    flushSync(() => {
+      setActiveImmediate(post.id);
+      setIsPlaying(true);
+    });
+    tryUnlockPlayFromGesture();
     requestAnimationFrame(() => {
       scrollRef.current
         ?.querySelector(`[data-post-id="${post.id}"]`)
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-    setIsPlaying(true);
   };
 
   return (
@@ -701,7 +747,11 @@ export default function Timeline({
                         post.id === activePostId || post.id === ioPostId
                           ? 1
                           : 0.35,
-                      transition: 'width 0.12s linear, opacity 0.2s ease',
+                      // No width transition while playing — SpotifyPlayer drives progress via rAF (~60fps).
+                      transition:
+                        post.id === activePostId && isPlaying
+                          ? 'opacity 0.2s ease'
+                          : 'width 0.15s linear, opacity 0.2s ease',
                     }}
                   />
                 </div>
@@ -729,6 +779,7 @@ export default function Timeline({
       </div>
 
       <SpotifyPlayer
+        ref={spotifyPlayerRef}
         src={
           activePost?.previewUrl?.trim()
             ? activePost.previewUrl
