@@ -1,4 +1,5 @@
 import {
+  useLayoutEffect,
   useEffect,
   useRef,
   useCallback,
@@ -6,7 +7,6 @@ import {
   useImperativeHandle,
 } from 'react';
 
-/** Fixed timeline for the progress bar (seconds). */
 export const PREVIEW_UI_DURATION_SEC = 15;
 
 export interface SpotifyPlayerProps {
@@ -16,18 +16,52 @@ export interface SpotifyPlayerProps {
   onProgress: (ratio: number) => void;
 }
 
-/** Call from a click handler (after flushSync) to satisfy autoplay policies when possible. */
 export type SpotifyPlayerHandle = {
-  /** Unmute, max volume, then play(). Returns the play() promise. */
-  unlockAndPlay: () => Promise<void>;
+  /** load() → canplay → unmute → play() in one chain (call from click after flushSync). */
+  loadAndPlayFromGesture: () => Promise<void>;
 };
 
-function applyAudibleAndPlay(a: HTMLAudioElement): Promise<void> {
+function effectiveDurationSeconds(a: HTMLAudioElement): number {
+  const d = a.duration;
+  if (
+    !Number.isFinite(d) ||
+    Number.isNaN(d) ||
+    d <= 0 ||
+    d === Number.POSITIVE_INFINITY
+  ) {
+    return PREVIEW_UI_DURATION_SEC;
+  }
+  return Math.min(d, PREVIEW_UI_DURATION_SEC);
+}
+
+/** Force unmute + full volume in the same turn as play(). */
+function playAudible(a: HTMLAudioElement): Promise<void> {
   a.muted = false;
   a.volume = 1.0;
   return a.play().catch((err) => {
     console.warn('Audio play blocked or failed:', err);
     throw err;
+  });
+}
+
+/** After load(), wait until media can play (single promise chain). */
+function afterLoadCanPlay(a: HTMLAudioElement): Promise<void> {
+  if (a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve, reject) => {
+    const onReady = () => {
+      a.removeEventListener('canplay', onReady);
+      a.removeEventListener('error', onErr);
+      resolve();
+    };
+    const onErr = () => {
+      a.removeEventListener('canplay', onReady);
+      a.removeEventListener('error', onErr);
+      reject(new Error('audio error'));
+    };
+    a.addEventListener('canplay', onReady, { once: true });
+    a.addEventListener('error', onErr, { once: true });
   });
 }
 
@@ -37,39 +71,26 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
     imperativeRef,
   ) {
     const audioRef = useRef<HTMLAudioElement>(null);
-    const lastSrcRef = useRef<string | null>(null);
+    /** URL we successfully bound to <audio> (skip redundant load when unchanged). */
+    const lastBoundSrcRef = useRef<string | null>(null);
+    const latestSrcRef = useRef<string | null>(null);
     const onProgressRef = useRef(onProgress);
     const setPlayingRef = useRef(setPlaying);
     const playingRef = useRef(playing);
     const rafRef = useRef<number | null>(null);
 
+    latestSrcRef.current = src;
     onProgressRef.current = onProgress;
     setPlayingRef.current = setPlaying;
     playingRef.current = playing;
 
-    /** Progress uses fixed 15s so the bar stays predictable when duration is unknown. */
     const updateProgress = useCallback(() => {
       const a = audioRef.current;
       if (!a) return;
-      const t = Math.min(a.currentTime, PREVIEW_UI_DURATION_SEC);
-      onProgressRef.current(
-        Math.min(1, Math.max(0, t / PREVIEW_UI_DURATION_SEC)),
-      );
+      const den = effectiveDurationSeconds(a);
+      const t = Math.min(a.currentTime, den);
+      onProgressRef.current(Math.min(1, Math.max(0, t / den)));
     }, []);
-
-    useImperativeHandle(imperativeRef, () => ({
-      unlockAndPlay: async () => {
-        const a = audioRef.current;
-        if (!a) return;
-        try {
-          a.muted = false;
-          a.volume = 1.0;
-          await applyAudibleAndPlay(a);
-        } catch {
-          setPlayingRef.current(false);
-        }
-      },
-    }));
 
     const stopRaf = useCallback(() => {
       if (rafRef.current != null) {
@@ -87,7 +108,104 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
       }
     }, [updateProgress]);
 
-    // High-frequency progress while playing (timeupdate alone is too sparse for a smooth bar)
+    /**
+     * Single chain: assign src → load() → canplay → optional play (with unmute inside play path).
+     */
+    const loadThenMaybePlay = useCallback(
+      async (a: HTMLAudioElement, url: string, shouldPlay: boolean) => {
+        a.pause();
+        a.src = url;
+        a.load();
+
+        try {
+          await afterLoadCanPlay(a);
+        } catch {
+          lastBoundSrcRef.current = null;
+          setPlayingRef.current(false);
+          onProgressRef.current(0);
+          return;
+        }
+
+        lastBoundSrcRef.current = url;
+        a.currentTime = 0;
+        onProgressRef.current(0);
+        a.muted = false;
+        a.volume = 1.0;
+
+        if (!shouldPlay) {
+          a.pause();
+          return;
+        }
+
+        try {
+          await playAudible(a);
+        } catch {
+          setPlayingRef.current(false);
+        }
+      },
+      [],
+    );
+
+    useImperativeHandle(imperativeRef, () => ({
+      loadAndPlayFromGesture: async () => {
+        const a = audioRef.current;
+        const url = latestSrcRef.current;
+        if (!a || !url) return;
+        playingRef.current = true;
+        await loadThenMaybePlay(a, url, true);
+      },
+    }));
+
+    useLayoutEffect(() => {
+      const a = audioRef.current;
+      if (!a) return;
+
+      let cancelled = false;
+
+      const sync = async () => {
+        if (!src) {
+          stopRaf();
+          lastBoundSrcRef.current = null;
+          a.pause();
+          a.removeAttribute('src');
+          a.load();
+          onProgressRef.current(0);
+          return;
+        }
+
+        const needLoad = lastBoundSrcRef.current !== src;
+
+        if (needLoad) {
+          await loadThenMaybePlay(a, src, playing);
+          if (cancelled) return;
+          if (!playing) {
+            a.pause();
+          }
+          return;
+        }
+
+        // Same src: playing true → play; playing false → pause only (keep currentTime)
+        a.muted = false;
+        a.volume = 1.0;
+
+        if (playing) {
+          try {
+            await playAudible(a);
+          } catch {
+            if (!cancelled) setPlayingRef.current(false);
+          }
+        } else {
+          a.pause();
+        }
+      };
+
+      void sync();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [src, playing, loadThenMaybePlay, stopRaf]);
+
     useEffect(() => {
       const a = audioRef.current;
       if (!playing || !src || !a) {
@@ -98,75 +216,6 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
       rafRef.current = requestAnimationFrame(tickRaf);
       return stopRaf;
     }, [playing, src, tickRaf, stopRaf]);
-
-    // Load / swap src
-    useEffect(() => {
-      const a = audioRef.current;
-      if (!a) return;
-
-      if (!src) {
-        stopRaf();
-        a.pause();
-        a.removeAttribute('src');
-        lastSrcRef.current = null;
-        a.load();
-        onProgressRef.current(0);
-        return;
-      }
-
-      if (lastSrcRef.current === src) {
-        a.muted = false;
-        a.volume = 1.0;
-        return;
-      }
-
-      lastSrcRef.current = src;
-      stopRaf();
-      a.pause();
-      a.src = src;
-      a.muted = false;
-      a.volume = 1.0;
-      a.load();
-      a.currentTime = 0;
-      onProgressRef.current(0);
-
-      const onReady = () => {
-        const el = audioRef.current;
-        if (!el) return;
-        el.muted = false;
-        el.volume = 1.0;
-        if (playingRef.current) {
-          void applyAudibleAndPlay(el).catch(() => {
-            setPlayingRef.current(false);
-          });
-        }
-      };
-
-      a.addEventListener('canplay', onReady, { once: true });
-
-      return () => {
-        a.removeEventListener('canplay', onReady);
-      };
-    }, [src, stopRaf]);
-
-    // Play / pause when media is already ready (same src)
-    useEffect(() => {
-      const a = audioRef.current;
-      if (!a || !src || lastSrcRef.current !== src) return;
-
-      a.muted = false;
-      a.volume = 1.0;
-
-      if (playing) {
-        if (a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
-          void applyAudibleAndPlay(a).catch(() => {
-            setPlayingRef.current(false);
-          });
-        }
-      } else {
-        a.pause();
-      }
-    }, [playing, src]);
 
     useEffect(() => {
       const a = audioRef.current;
@@ -186,8 +235,6 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
         a.removeEventListener('ended', onEnded);
       };
     }, [src, updateProgress, stopRaf]);
-
-    if (!src) return null;
 
     return (
       <audio

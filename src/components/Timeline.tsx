@@ -107,11 +107,11 @@ export default function Timeline({
     setActivePostId(postId);
   }, []);
 
-  /** Double rAF after flushSync keeps `unlockAndPlay` near the user gesture for autoplay policy. */
-  const tryUnlockPlayFromGesture = useCallback(() => {
+  /** After flushSync, chain is still user-gesture aligned; rAF runs load→canplay→play in player. */
+  const tryLoadAndPlayFromGesture = useCallback(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        void spotifyPlayerRef.current?.unlockAndPlay().catch(() => {
+        void spotifyPlayerRef.current?.loadAndPlayFromGesture().catch(() => {
           setIsPlaying(false);
         });
       });
@@ -388,18 +388,23 @@ export default function Timeline({
         setIsPlaying(false);
         setPreviewProgress(0);
       }
-    }, 520);
+    }, 500);
 
     return () => clearTimeout(timer);
   }, [activePostId]);
 
+  // Only stop if active post has had no preview for 500ms (avoids flicker while posts/users load).
   useEffect(() => {
     if (!activePostId) return;
-    const p = posts.find((x) => x.id === activePostId);
-    if (p && !p.previewUrl?.trim()) {
-      setIsPlaying(false);
-      setPreviewProgress(0);
-    }
+    const timer = window.setTimeout(() => {
+      if (activePostIdRef.current !== activePostId) return;
+      const p = posts.find((x) => x.id === activePostIdRef.current);
+      if (p && !p.previewUrl?.trim()) {
+        setIsPlaying(false);
+        setPreviewProgress(0);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
   }, [activePostId, posts]);
 
   useEffect(() => {
@@ -573,14 +578,14 @@ export default function Timeline({
     }
     if (post.id === activePostId && !isPlaying) {
       flushSync(() => setIsPlaying(true));
-      tryUnlockPlayFromGesture();
+      tryLoadAndPlayFromGesture();
       return;
     }
     flushSync(() => {
       setActiveImmediate(post.id);
       setIsPlaying(true);
     });
-    tryUnlockPlayFromGesture();
+    tryLoadAndPlayFromGesture();
     requestAnimationFrame(() => {
       scrollRef.current
         ?.querySelector(`[data-post-id="${post.id}"]`)
@@ -739,7 +744,7 @@ export default function Timeline({
                     style={{
                       width:
                         post.id === activePostId && post.previewUrl
-                          ? `${Math.min(100, previewProgress * 100)}%`
+                          ? `${Math.min(100, Math.max(0, previewProgress) * 100)}%`
                           : post.id === ioPostId
                             ? '33%'
                             : '12%',
@@ -747,7 +752,6 @@ export default function Timeline({
                         post.id === activePostId || post.id === ioPostId
                           ? 1
                           : 0.35,
-                      // No width transition while playing — SpotifyPlayer drives progress via rAF (~60fps).
                       transition:
                         post.id === activePostId && isPlaying
                           ? 'opacity 0.2s ease'
