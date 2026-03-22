@@ -21,6 +21,7 @@ import { supabase } from '../lib/supabase';
 import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
 import PostReplySheet from './PostReplySheet';
+import SpotifyPlayer, { PREVIEW_UI_DURATION_SEC } from './SpotifyPlayer';
 
 interface TimelineProps {
   /** UUID or `display_id` for routing (`/@handle` or `/user/uuid`). */
@@ -39,7 +40,14 @@ export default function Timeline({
   shareCooldownText = '',
 }: TimelineProps) {
   const [posts, setPosts] = useState<Post[]>([]);
-  const [visiblePostId, setVisiblePostId] = useState<string | null>(null);
+  /** IO-suggested post (updates often while scrolling). */
+  const [ioPostId, setIoPostId] = useState<string | null>(null);
+  /** Debounced + “locked” for audio/reactions; immediate on play tap. */
+  const [activePostId, setActivePostId] = useState<string | null>(null);
+  const scrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevActivePostIdRef = useRef<string | null>(null);
+  /** When true, active id changed from an explicit play tap — don’t force pause. */
+  const skipPlayingResetRef = useRef(false);
   const [usersById, setUsersById] = useState<Record<string, User>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -50,8 +58,8 @@ export default function Timeline({
   const [seedRefreshNonce, setSeedRefreshNonce] = useState(0);
   const [isSeeding, setIsSeeding] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [previewProgress, setPreviewProgress] = useState(0);
   const [userReactionSet, setUserReactionSet] = useState<
     Set<InstrumentType>
   >(new Set());
@@ -68,8 +76,27 @@ export default function Timeline({
     keyboard: Piano,
   };
 
-  const visiblePost =
-    posts.find((p) => p.id === visiblePostId) ?? posts[0] ?? null;
+  const activePost =
+    posts.find((p) => p.id === activePostId) ?? posts[0] ?? null;
+
+  const scheduleActiveFromScroll = useCallback((postId: string) => {
+    setIoPostId(postId);
+    if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+    scrollDebounceRef.current = setTimeout(() => {
+      scrollDebounceRef.current = null;
+      setActivePostId(postId);
+    }, 280);
+  }, []);
+
+  const setActiveImmediate = useCallback((postId: string) => {
+    if (scrollDebounceRef.current) {
+      clearTimeout(scrollDebounceRef.current);
+      scrollDebounceRef.current = null;
+    }
+    skipPlayingResetRef.current = true;
+    setIoPostId(postId);
+    setActivePostId(postId);
+  }, []);
 
   const syncReplyCount = useCallback(async (postId: string) => {
     const c = await fetchReplyCountForPost(postId);
@@ -271,7 +298,13 @@ export default function Timeline({
         return true;
       });
       setPosts(deduped);
-      setVisiblePostId(deduped[0]?.id ?? null);
+      const firstId = deduped[0]?.id ?? null;
+      setIoPostId(firstId);
+      setActivePostId(firstId);
+      if (scrollDebounceRef.current) {
+        clearTimeout(scrollDebounceRef.current);
+        scrollDebounceRef.current = null;
+      }
       setIsLoading(false);
     };
 
@@ -301,10 +334,31 @@ export default function Timeline({
 
   useEffect(() => {
     if (posts.length === 0) return;
-    if (visiblePostId && !posts.some((p) => p.id === visiblePostId)) {
-      setVisiblePostId(posts[0].id);
+    if (activePostId && !posts.some((p) => p.id === activePostId)) {
+      const fallback = posts[0].id;
+      setActivePostId(fallback);
+      setIoPostId(fallback);
     }
-  }, [posts, visiblePostId]);
+  }, [posts, activePostId]);
+
+  useEffect(() => {
+    if (prevActivePostIdRef.current === activePostId) return;
+    prevActivePostIdRef.current = activePostId;
+    if (skipPlayingResetRef.current) {
+      skipPlayingResetRef.current = false;
+      setPreviewProgress(0);
+      return;
+    }
+    setIsPlaying(false);
+    setPreviewProgress(0);
+  }, [activePostId]);
+
+  useEffect(() => {
+    if (!activePost?.previewUrl) {
+      setIsPlaying(false);
+      setPreviewProgress(0);
+    }
+  }, [activePost?.id, activePost?.previewUrl]);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -319,6 +373,8 @@ export default function Timeline({
           if (en.isIntersecting) ratios.set(en.target, en.intersectionRatio);
           else ratios.delete(en.target);
         }
+        if (ratios.size === 0) return;
+
         let bestEl: Element | null = null;
         let best = 0;
         for (const [el, r] of ratios) {
@@ -331,12 +387,12 @@ export default function Timeline({
           bestEl instanceof HTMLElement
             ? bestEl.dataset.postId ?? null
             : null;
-        if (id) setVisiblePostId(id);
+        if (id) scheduleActiveFromScroll(id);
       },
       {
         root,
-        rootMargin: '-18% 0px -18% 0px',
-        threshold: [0, 0.15, 0.35, 0.55, 0.75, 1],
+        rootMargin: '0px 0px -8% 0px',
+        threshold: [0, 0.05, 0.15, 0.25, 0.35, 0.5, 0.65, 0.8, 1],
       },
     );
 
@@ -350,7 +406,7 @@ export default function Timeline({
       cancelAnimationFrame(raf);
       obs.disconnect();
     };
-  }, [posts]);
+  }, [posts, scheduleActiveFromScroll]);
 
   const handleSeedTestData = async () => {
     setIsSeeding(true);
@@ -385,19 +441,10 @@ export default function Timeline({
     ) : null;
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-    }
-    setIsPlaying(false);
-  }, [visiblePostId]);
-
-  useEffect(() => {
-    if (!authUserId || !visiblePost) return;
-    refreshReactionsForPost(visiblePost.id, authUserId);
+    if (!authUserId || !activePost) return;
+    refreshReactionsForPost(activePost.id, authUserId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUserId, visiblePost?.id, posts.length]);
+  }, [authUserId, activePost?.id, posts.length]);
 
   const shareFab = (
     <motion.button
@@ -476,20 +523,24 @@ export default function Timeline({
     );
   }
 
-  const hasPreview = Boolean(visiblePost?.previewUrl);
-
-  const togglePlayPause = () => {
-    const audio = audioRef.current;
-    if (!audio || !visiblePost || !visiblePost.previewUrl) return;
-    if (isPlaying) {
-      audio.pause();
-    } else {
-      audio.play().catch(() => {});
+  const handlePlayForPost = (post: Post) => {
+    if (!post.previewUrl) return;
+    if (post.id === activePostId && isPlaying) {
+      setIsPlaying(false);
+      return;
     }
-    setIsPlaying(!isPlaying);
+    if (post.id === activePostId && !isPlaying) {
+      setIsPlaying(true);
+      return;
+    }
+    setActiveImmediate(post.id);
+    requestAnimationFrame(() => {
+      scrollRef.current
+        ?.querySelector(`[data-post-id="${post.id}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    setIsPlaying(true);
   };
-
-  const handleAudioEnded = () => setIsPlaying(false);
 
   return (
     <>
@@ -550,46 +601,27 @@ export default function Timeline({
                   />
                   <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-zinc-950/75 to-transparent" />
                   {post.previewUrl ? (
-                    post.id === visiblePost?.id ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePlayPause();
-                        }}
-                        className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/25 transition-colors hover:bg-black/35"
-                        aria-label={
-                          isPlaying ? '一時停止' : '再生'
-                        }
-                      >
-                        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 shadow-lg">
-                          {isPlaying ? (
-                            <Pause className="h-8 w-8 fill-zinc-900 text-zinc-900" />
-                          ) : (
-                            <Play className="ml-1 h-8 w-8 fill-zinc-900 text-zinc-900" />
-                          )}
-                        </span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          scrollRef.current
-                            ?.querySelector(`[data-post-id="${post.id}"]`)
-                            ?.scrollIntoView({
-                              behavior: 'smooth',
-                              block: 'center',
-                            });
-                        }}
-                        className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/20 transition-colors hover:bg-black/30"
-                        aria-label="この投稿へ移動して再生"
-                      >
-                        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/75 shadow-lg">
-                          <Play className="ml-1 h-7 w-7 text-zinc-800 opacity-80" />
-                        </span>
-                      </button>
-                    )
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePlayForPost(post);
+                      }}
+                      className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/25 transition-colors hover:bg-black/35"
+                      aria-label={
+                        post.id === activePostId && isPlaying
+                          ? '一時停止'
+                          : '再生'
+                      }
+                    >
+                      <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 shadow-lg">
+                        {post.id === activePostId && isPlaying ? (
+                          <Pause className="h-8 w-8 fill-zinc-900 text-zinc-900" />
+                        ) : (
+                          <Play className="ml-1 h-8 w-8 fill-zinc-900 text-zinc-900" />
+                        )}
+                      </span>
+                    </button>
                   ) : null}
                 </div>
 
@@ -657,13 +689,29 @@ export default function Timeline({
               >
                 <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800/80">
                   <div
-                    className={`h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 ${
-                      post.id === visiblePost?.id ? 'w-full' : 'w-1/3 opacity-40'
-                    }`}
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
+                    style={{
+                      width:
+                        post.id === activePostId && post.previewUrl
+                          ? `${Math.min(100, previewProgress * 100)}%`
+                          : post.id === ioPostId
+                            ? '33%'
+                            : '12%',
+                      opacity:
+                        post.id === activePostId || post.id === ioPostId
+                          ? 1
+                          : 0.35,
+                      transition: 'width 0.12s linear, opacity 0.2s ease',
+                    }}
                   />
                 </div>
                 <p className="mt-2 text-center text-xs text-zinc-500">
                   {posts.findIndex((p) => p.id === post.id) + 1} / {posts.length}
+                  {post.id === activePostId && post.previewUrl ? (
+                    <span className="ml-2 text-[10px] text-zinc-600">
+                      プレビュー最大 {PREVIEW_UI_DURATION_SEC} 秒
+                    </span>
+                  ) : null}
                 </p>
               </div>
             </section>
@@ -680,23 +728,24 @@ export default function Timeline({
         </footer>
       </div>
 
-      {hasPreview && visiblePost ? (
-        <audio
-          key={`audio-${visiblePost.id}`}
-          ref={audioRef}
-          src={visiblePost.previewUrl}
-          onEnded={handleAudioEnded}
-          preload="metadata"
-        />
-      ) : null}
+      <SpotifyPlayer
+        src={
+          activePost?.previewUrl?.trim()
+            ? activePost.previewUrl
+            : null
+        }
+        playing={isPlaying}
+        setPlaying={setIsPlaying}
+        onProgress={setPreviewProgress}
+      />
 
-      {/* Reaction rail follows the post in view */}
-      {visiblePost ? (
+      {/* Reaction rail follows the active (debounced) post */}
+      {activePost ? (
         <div className="pointer-events-auto fixed bottom-6 left-1/2 z-20 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
           {(Object.keys(instrumentIcons) as InstrumentType[]).map(
             (instrument) => {
               const Icon = instrumentIcons[instrument];
-              const count = visiblePost.reactions[instrument];
+              const count = activePost.reactions[instrument];
               const isMine = userReactionSet.has(instrument);
               return (
                 <motion.button
@@ -704,7 +753,7 @@ export default function Timeline({
                   type="button"
                   whileTap={{ scale: 0.9 }}
                   onClick={() =>
-                    toggleReaction(visiblePost.id, instrument)
+                    toggleReaction(activePost.id, instrument)
                   }
                   className="group flex flex-col items-center gap-1"
                 >
@@ -731,15 +780,15 @@ export default function Timeline({
             },
           )}
 
-          {usersById[visiblePost.userId] ? (
+          {usersById[activePost.userId] ? (
             <motion.button
               type="button"
               whileTap={{ scale: 0.9 }}
               onClick={() =>
                 onViewProfile(
-                  usersById[visiblePost.userId].displayId?.trim()
-                    ? usersById[visiblePost.userId].displayId!
-                    : visiblePost.userId,
+                  usersById[activePost.userId].displayId?.trim()
+                    ? usersById[activePost.userId].displayId!
+                    : activePost.userId,
                 )
               }
               className="group mt-0 flex flex-col items-center gap-1 sm:mt-4"
@@ -747,10 +796,10 @@ export default function Timeline({
               <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20">
                 <img
                   src={
-                    usersById[visiblePost.userId].avatar ||
+                    usersById[activePost.userId].avatar ||
                     'https://placehold.co/48x48?text=U'
                   }
-                  alt={usersById[visiblePost.userId].name}
+                  alt={usersById[activePost.userId].name}
                   className="h-full w-full object-cover"
                 />
               </div>
