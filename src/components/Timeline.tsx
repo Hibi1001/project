@@ -545,7 +545,6 @@ export default function Timeline({
         {devSeedButton}
         <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
           <div className="text-sm text-zinc-400">Loading timeline...</div>
-          {shareFab}
         </div>
       </>
     );
@@ -564,7 +563,6 @@ export default function Timeline({
               </span>
             ) : null}
           </div>
-          {shareFab}
         </div>
       </>
     );
@@ -606,7 +604,7 @@ export default function Timeline({
 
       <div
         ref={scrollRef}
-        className="fixed inset-0 overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth [-webkit-overflow-scrolling:touch]"
+        className="fixed inset-0 snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y [-webkit-overflow-scrolling:touch]"
         style={{ scrollSnapType: 'y mandatory' }}
       >
         {posts.map((post) => {
@@ -685,7 +683,7 @@ export default function Timeline({
                   </p>
 
                   {post.caption ? (
-                    <div className="mx-auto mt-2 max-w-[92%] rounded-2xl border border-white/20 bg-black/40 px-4 py-3 text-left shadow-lg backdrop-blur-md">
+                    <div className="mx-auto mt-3 mb-2 max-w-[82%] rounded-2xl border border-white/20 bg-black/40 px-4 py-3 text-left shadow-lg backdrop-blur-md sm:max-w-[88%]">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">
                         ひとこと
                       </p>
@@ -701,7 +699,7 @@ export default function Timeline({
                       e.stopPropagation();
                       openReplySheet(post.id);
                     }}
-                    className="mt-4 inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
+                    className="mt-5 inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
                   >
                     <MessageCircle className="h-4 w-4 text-emerald-400" />
                     返信

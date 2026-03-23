@@ -503,7 +503,9 @@ export default function Profile({
             >
               <ArrowLeft className="w-6 h-6 text-zinc-400" />
             </button>
-            <h1 className="text-xl font-bold text-zinc-50">プロフィール</h1>
+            <h1 className="whitespace-nowrap text-2xl font-bold text-zinc-50 sm:text-4xl">
+              プロフィール
+            </h1>
             {isOwnProfile && (
               <>
                 <button
