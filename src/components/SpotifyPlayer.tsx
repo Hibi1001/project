@@ -7,7 +7,7 @@ import {
   useImperativeHandle,
 } from 'react';
 
-export const PREVIEW_UI_DURATION_SEC = 15;
+export const PREVIEW_UI_DURATION_SEC = 30;
 
 export interface SpotifyPlayerProps {
   src: string | null;
@@ -88,7 +88,14 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
       const a = audioRef.current;
       if (!a) return;
       const den = effectiveDurationSeconds(a);
-      const t = Math.min(a.currentTime, den);
+      if (a.currentTime >= den - 0.02) {
+        a.pause();
+        a.currentTime = den;
+        setPlayingRef.current(false);
+        onProgressRef.current(1);
+        return;
+      }
+      const t = a.currentTime;
       onProgressRef.current(Math.min(1, Math.max(0, t / den)));
     }, []);
 

@@ -633,7 +633,7 @@ export default function Timeline({
 
       <div
         ref={scrollRef}
-        className="fixed inset-0 snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y pt-[max(env(safe-area-inset-top),0px)] [-webkit-overflow-scrolling:touch]"
+        className="fixed inset-0 box-border snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] [-webkit-overflow-scrolling:touch]"
         style={{ scrollSnapType: 'y mandatory' }}
       >
         {posts.map((post) => {
@@ -788,7 +788,7 @@ export default function Timeline({
           );
         })}
 
-        <footer className="flex min-h-[32vh] snap-end flex-col items-center justify-center border-t border-zinc-800/60 bg-zinc-950/80 px-6 py-16 text-center">
+        <footer className="flex min-h-[32dvh] snap-end flex-col items-center justify-center border-t border-zinc-800/60 bg-zinc-950/80 px-6 py-16 text-center">
           <p className="text-sm font-medium text-zinc-500">
             タイムラインはここまで
           </p>
@@ -812,7 +812,7 @@ export default function Timeline({
 
       {/* Reaction rail follows the active (debounced) post */}
       {activePost ? (
-        <div className="pointer-events-auto fixed bottom-6 left-1/2 z-20 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
+        <div className="pointer-events-auto fixed bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] left-1/2 z-20 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
           {(Object.keys(instrumentIcons) as InstrumentType[]).map(
             (instrument) => {
               const Icon = instrumentIcons[instrument];
