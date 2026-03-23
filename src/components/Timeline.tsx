@@ -1,16 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
-import { motion } from 'framer-motion';
-import {
-  Mic,
-  Guitar,
-  Music2,
-  Drum,
-  Piano,
-  Play,
-  Pause,
-  MessageCircle,
-} from 'lucide-react';
+import { Play, Pause, MessageCircle } from 'lucide-react';
 import { Post, InstrumentType, User } from '../types';
 import {
   fetchTimelinePosts,
@@ -21,6 +11,7 @@ import { supabase } from '../lib/supabase';
 import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
 import PostReplySheet from './PostReplySheet';
+import RevolverReactionPalette from './RevolverReactionPalette';
 import SpotifyPlayer, {
   PREVIEW_UI_DURATION_SEC,
   type SpotifyPlayerHandle,
@@ -73,14 +64,6 @@ export default function Timeline({
   const [replySheetPostId, setReplySheetPostId] = useState<string | null>(
     null,
   );
-
-  const instrumentIcons = {
-    vocal: Mic,
-    guitar: Guitar,
-    bass: Music2,
-    drum: Drum,
-    keyboard: Piano,
-  };
 
   const activePost =
     posts.find((p) => p.id === activePostId) ?? posts[0] ?? null;
@@ -613,7 +596,7 @@ export default function Timeline({
               key={post.id}
               data-timeline-post
               data-post-id={post.id}
-              className="relative flex min-h-[100dvh] snap-start snap-always flex-col items-center justify-center px-6 pb-40 pt-10"
+              className="relative flex min-h-[100dvh] snap-start snap-always flex-col items-center justify-center px-6 pb-56 pt-10"
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -776,48 +759,12 @@ export default function Timeline({
         onProgress={setPreviewProgress}
       />
 
-      {/* Reaction rail follows the active (debounced) post */}
       {activePost ? (
-        <div className="pointer-events-auto fixed bottom-6 left-1/2 z-20 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
-          {(Object.keys(instrumentIcons) as InstrumentType[]).map(
-            (instrument) => {
-              const Icon = instrumentIcons[instrument];
-              const count = activePost.reactions[instrument];
-              const isMine = userReactionSet.has(instrument);
-              return (
-                <motion.button
-                  key={instrument}
-                  type="button"
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() =>
-                    toggleReaction(activePost.id, instrument)
-                  }
-                  className="group flex flex-col items-center gap-1"
-                >
-                  <div
-                    className={`flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20 ${
-                      isMine
-                        ? 'bg-emerald-500/10 ring-2 ring-emerald-500/60'
-                        : ''
-                    }`}
-                  >
-                    <Icon
-                      className={`h-6 w-6 transition-colors ${
-                        isMine
-                          ? 'text-emerald-400'
-                          : 'text-zinc-400 group-hover:text-emerald-400'
-                      }`}
-                    />
-                  </div>
-                  <span className="text-xs font-semibold text-zinc-400">
-                    {count}
-                  </span>
-                </motion.button>
-              );
-            },
-          )}
-
-        </div>
+        <RevolverReactionPalette
+          activePost={activePost}
+          userReactionSet={userReactionSet}
+          toggleReaction={toggleReaction}
+        />
       ) : null}
     </>
   );

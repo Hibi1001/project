@@ -71,16 +71,28 @@ export interface DbPostReply {
   user_id: string;
   content: string;
   created_at: string;
+  parent_id?: string | null;
 }
 
 /** Reply row enriched for UI. */
 export interface PostReply {
   id: string;
   userId: string;
+  /** Parent reply id for threaded chat; null = top-level. */
+  parentId: string | null;
   content: string;
   createdAt: string;
   authorName: string;
   authorAvatar: string;
+  likeCount: number;
+  likedByMe: boolean;
+}
+
+export interface DbReplyLike {
+  id: string;
+  reply_id: string;
+  user_id: string;
+  created_at: string;
 }
 
 export interface DbReaction {

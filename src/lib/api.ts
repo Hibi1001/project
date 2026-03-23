@@ -354,10 +354,44 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
   return mapDbPostToPost(data as DbPost, undefined, 0);
 }
 
-export async function fetchPostReplies(postId: string): Promise<PostReply[]> {
+async function fetchReplyLikeAggregates(
+  replyIds: string[],
+  authUserId: string | null,
+): Promise<{ counts: Record<string, number>; mine: Set<string> }> {
+  if (replyIds.length === 0) return { counts: {}, mine: new Set() };
+
+  const { data, error } = await supabase
+    .from('reply_likes')
+    .select('reply_id, user_id')
+    .in('reply_id', replyIds);
+
+  if (error) {
+    console.error('Error fetching reply likes', error);
+    return { counts: {}, mine: new Set() };
+  }
+
+  const counts: Record<string, number> = {};
+  const mine = new Set<string>();
+  for (const row of data ?? []) {
+    const rid = (row as { reply_id: string }).reply_id;
+    counts[rid] = (counts[rid] ?? 0) + 1;
+    if (
+      authUserId &&
+      (row as { user_id: string }).user_id === authUserId
+    ) {
+      mine.add(rid);
+    }
+  }
+  return { counts, mine };
+}
+
+export async function fetchPostReplies(
+  postId: string,
+  authUserId: string | null,
+): Promise<PostReply[]> {
   const { data, error } = await supabase
     .from('post_replies')
-    .select('id, user_id, content, created_at')
+    .select('id, user_id, content, created_at, parent_id')
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
 
@@ -375,16 +409,23 @@ export async function fetchPostReplies(postId: string): Promise<PostReply[]> {
     users.filter(Boolean).map((u) => [u!.id, u!] as const),
   );
 
+  const ids = rows.map((r) => r.id as string);
+  const { counts, mine } = await fetchReplyLikeAggregates(ids, authUserId);
+
   return rows.map((r) => {
     const uid = r.user_id as string;
     const u = userMap.get(uid);
+    const id = r.id as string;
     return {
-      id: r.id as string,
+      id,
       userId: uid,
+      parentId: (r.parent_id as string | null) ?? null,
       content: r.content as string,
       createdAt: r.created_at as string,
       authorName: u?.name ?? 'ユーザー',
       authorAvatar: u?.avatar ?? '',
+      likeCount: counts[id] ?? 0,
+      likedByMe: mine.has(id),
     };
   });
 }
@@ -393,22 +434,80 @@ export async function insertPostReply(
   postId: string,
   userId: string,
   content: string,
+  parentId?: string | null,
 ): Promise<void> {
   const trimmed = content.trim().slice(0, POST_REPLY_MAX_LENGTH);
   if (!trimmed) {
     throw new Error('返信を入力してください');
   }
 
-  const { error } = await supabase.from('post_replies').insert({
+  if (parentId) {
+    const { data: parentRow, error: parentErr } = await supabase
+      .from('post_replies')
+      .select('id, post_id')
+      .eq('id', parentId)
+      .maybeSingle();
+
+    if (parentErr || !parentRow) {
+      throw new Error('返信先が見つかりません');
+    }
+    if ((parentRow as { post_id: string }).post_id !== postId) {
+      throw new Error('返信先がこの投稿と一致しません');
+    }
+  }
+
+  const insert: Record<string, unknown> = {
     post_id: postId,
     user_id: userId,
     content: trimmed,
-  });
+  };
+  if (parentId) insert.parent_id = parentId;
+
+  const { error } = await supabase.from('post_replies').insert(insert);
 
   if (error) {
     console.error('Error inserting reply', error);
     throw new Error(error.message);
   }
+}
+
+export async function toggleReplyLike(
+  replyId: string,
+  userId: string,
+): Promise<{ liked: boolean }> {
+  const { data: existing, error: selErr } = await supabase
+    .from('reply_likes')
+    .select('id')
+    .eq('reply_id', replyId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (selErr) {
+    console.error('Error checking reply like', selErr);
+    throw new Error(selErr.message);
+  }
+
+  if (existing) {
+    const { error: delErr } = await supabase
+      .from('reply_likes')
+      .delete()
+      .eq('id', (existing as { id: string }).id);
+    if (delErr) {
+      console.error('Error removing reply like', delErr);
+      throw new Error(delErr.message);
+    }
+    return { liked: false };
+  }
+
+  const { error: insErr } = await supabase.from('reply_likes').insert({
+    reply_id: replyId,
+    user_id: userId,
+  });
+  if (insErr) {
+    console.error('Error inserting reply like', insErr);
+    throw new Error(insErr.message);
+  }
+  return { liked: true };
 }
 
 export interface iTunesSongResult {
