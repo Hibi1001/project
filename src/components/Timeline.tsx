@@ -530,11 +530,11 @@ export default function Timeline({
         {devSeedButton}
         <LockScreen
           onUnlock={onShareSong}
-          onShareSong={onShareSong}
           shareSongDisabled={shareSongDisabled}
           shareCooldownText={shareCooldownText}
           onViewTimelineWhenCooldown={() => setViewTimelineWithoutPostToday(true)}
         />
+        {!isAuthLoading && shareFab}
       </>
     );
   }

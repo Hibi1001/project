@@ -1,10 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Music, Lock, Plus } from 'lucide-react';
+import { Music, Lock } from 'lucide-react';
 
 interface LockScreenProps {
   /** Primary action: App = go to timeline; Timeline (can post) = open share modal. */
   onUnlock: () => void;
-  onShareSong: () => void;
   /** True during 12h cooldown — secondary share is disabled. */
   shareSongDisabled?: boolean;
   /** e.g. 「次のシェアまであと ○時間○分」 */
@@ -18,7 +17,6 @@ interface LockScreenProps {
 
 export default function LockScreen({
   onUnlock,
-  onShareSong,
   shareSongDisabled = false,
   shareCooldownText = '',
   onViewTimelineWhenCooldown,
@@ -143,25 +141,10 @@ export default function LockScreen({
           </AnimatePresence>
         </div>
 
-        <motion.button
-          whileHover={shareSongDisabled ? {} : { scale: 1.02 }}
-          whileTap={shareSongDisabled ? {} : { scale: 0.98 }}
-          onClick={shareSongDisabled ? undefined : onShareSong}
-          disabled={shareSongDisabled}
-          className={`mt-4 w-full flex items-center justify-center gap-2 py-3 px-6 rounded-full border transition-colors ${
-            shareSongDisabled
-              ? 'text-zinc-500 border-zinc-700 cursor-not-allowed opacity-60 pointer-events-none'
-              : 'text-zinc-300 border-zinc-600 hover:bg-zinc-800/50 hover:text-zinc-50'
-          }`}
-        >
-          <Plus className="w-5 h-5" />
-          <span className="text-sm font-medium">曲をシェア</span>
-        </motion.button>
-
         <p className="text-zinc-600 text-xs mt-6">
           {shareSongDisabled
             ? 'シェアのクールダウン中です（上のボタンでタイムラインを開けます）'
-            : '曲をシェアから今日の1曲を投稿できます'}
+            : '右下の＋から今日の1曲を投稿できます'}
         </p>
       </motion.div>
     </div>
