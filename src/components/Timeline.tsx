@@ -861,7 +861,7 @@ export default function Timeline({
         </div>
       ) : null}
 
-      {shareFab}
+      {!isAuthLoading ? shareFab : null}
     </>
   );
 }
