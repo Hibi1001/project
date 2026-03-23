@@ -502,7 +502,7 @@ export default function Timeline({
       title={
         shareSongDisabled && shareCooldownText ? shareCooldownText : undefined
       }
-      className={`fixed bottom-8 right-8 z-30 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ${
+      className={`fixed bottom-8 right-8 z-50 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ${
         shareSongDisabled
           ? 'cursor-not-allowed bg-zinc-700 opacity-50'
           : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
@@ -833,35 +833,10 @@ export default function Timeline({
             },
           )}
 
-          {usersById[activePost.userId] ? (
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.9 }}
-              onClick={() =>
-                onViewProfile(
-                  usersById[activePost.userId].displayId?.trim()
-                    ? usersById[activePost.userId].displayId!
-                    : activePost.userId,
-                )
-              }
-              className="group mt-0 flex flex-col items-center gap-1 sm:mt-4"
-            >
-              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20">
-                <img
-                  src={
-                    usersById[activePost.userId].avatar ||
-                    'https://placehold.co/48x48?text=U'
-                  }
-                  alt={usersById[activePost.userId].name}
-                  className="h-full w-full object-cover"
-                />
-              </div>
-            </motion.button>
-          ) : null}
         </div>
       ) : null}
 
-      {!isAuthLoading ? shareFab : null}
+      {activePost && !isAuthLoading && shareFab}
     </>
   );
 }
