@@ -1,3 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* PWA / native feel: limit browser rubber-banding & pull-to-refresh bleed */
+@layer base {
+  html {
+    overscroll-behavior-y: none;
+  }
+  body {
+    touch-action: pan-y;
+    overscroll-behavior-y: none;
+  }
+}

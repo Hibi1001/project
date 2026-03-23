@@ -1,7 +1,7 @@
 {
-  "name": "University Light Music SNS",
-  "short_name": "Light Music SNS",
-  "description": "Share today’s song and connect with the light music circle.",
+  "name": "Feel Now",
+  "short_name": "Feel Now",
+  "description": "Share the moment — your session, your sound.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
