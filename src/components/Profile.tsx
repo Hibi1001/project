@@ -495,22 +495,22 @@ export default function Profile({
   return (
     <div className="fixed inset-0 bg-zinc-950 overflow-y-auto">
       <div className="max-w-2xl mx-auto">
-        <div className="sticky top-0 z-20 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800">
-          <div className="px-4 py-4 flex items-center gap-4">
+        <div className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/80 pt-[max(env(safe-area-inset-top),0px)] backdrop-blur-md">
+          <div className="flex flex-row items-center justify-between gap-3 px-4 py-3">
             <button
               onClick={onBack}
               className="p-2 hover:bg-zinc-800 rounded-full transition-colors"
             >
               <ArrowLeft className="w-6 h-6 text-zinc-400" />
             </button>
-            <h1 className="whitespace-nowrap text-2xl font-bold text-zinc-50 sm:text-4xl">
+            <h1 className="whitespace-nowrap text-lg font-bold text-zinc-50 sm:text-2xl">
               プロフィール
             </h1>
             {isOwnProfile && (
-              <>
+              <div className="ml-auto flex shrink-0 items-center gap-2">
                 <button
                   onClick={openEdit}
-                  className="ml-auto px-4 py-2 rounded-full bg-zinc-800/60 hover:bg-zinc-800 text-zinc-200 text-sm font-semibold border border-zinc-700/60 transition-colors"
+                  className="whitespace-nowrap rounded-full border border-zinc-700/60 bg-zinc-800/60 px-3 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:bg-zinc-800 sm:px-4 sm:text-sm"
                 >
                   プロフィールを編集
                 </button>
@@ -525,11 +525,11 @@ export default function Profile({
                     await supabase.auth.signOut();
                     window.location.reload();
                   }}
-                  className="ml-2 text-xs text-zinc-500 hover:text-zinc-300 underline-offset-2 hover:underline"
+                  className="hidden text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline sm:inline"
                 >
                   Sign out / Reset
                 </button>
-              </>
+              </div>
             )}
           </div>
         </div>

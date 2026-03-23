@@ -604,7 +604,7 @@ export default function Timeline({
 
       <div
         ref={scrollRef}
-        className="fixed inset-0 snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y [-webkit-overflow-scrolling:touch]"
+        className="fixed inset-0 snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y pt-[max(env(safe-area-inset-top),0px)] [-webkit-overflow-scrolling:touch]"
         style={{ scrollSnapType: 'y mandatory' }}
       >
         {posts.map((post) => {
