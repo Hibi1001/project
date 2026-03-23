@@ -1,18 +1,23 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Music, Lock, Plus } from 'lucide-react';
+import { DAILY_POST_LIMIT } from '../constants/posting';
 
 interface LockScreenProps {
   /** Primary action: App = go to timeline; Timeline (can post) = open share modal. */
   onUnlock: () => void;
-  /** True during 12h cooldown — secondary share is disabled. */
+  /** True when share is blocked (e.g. 12h cooldown since last post). */
   shareSongDisabled?: boolean;
-  /** e.g. 「次のシェアまであと ○時間○分」 */
+  /** e.g. cooldown countdown or daily-cap message from parent. */
   shareCooldownText?: string;
   /**
    * Optional override for the main CTA when `shareSongDisabled` (e.g. Timeline bypass).
    * If omitted, `onUnlock` is used (e.g. App lock → `handleUnlock`).
    */
   onViewTimelineWhenCooldown?: () => void;
+  /** Posts already shared today (calendar day). */
+  dailyPostCount?: number;
+  /** Defaults to `DAILY_POST_LIMIT`. */
+  dailyPostLimit?: number;
 }
 
 export default function LockScreen({
@@ -20,11 +25,13 @@ export default function LockScreen({
   shareSongDisabled = false,
   shareCooldownText = '',
   onViewTimelineWhenCooldown,
+  dailyPostCount = 0,
+  dailyPostLimit = DAILY_POST_LIMIT,
 }: LockScreenProps) {
-  /** 12h cooldown always drives the zinc 「タイムラインを見る」 main button. */
   const showCooldownMain = shareSongDisabled;
   const onCooldownMainClick =
     onViewTimelineWhenCooldown ?? onUnlock;
+  const remaining = Math.max(0, dailyPostLimit - dailyPostCount);
 
   return (
     <div className="fixed inset-0 bg-zinc-950 flex items-center justify-center overflow-hidden">
@@ -67,14 +74,26 @@ export default function LockScreen({
           今日の音楽を<br />シェアしよう
         </h1>
 
-        <p className="text-zinc-400 mb-8 text-sm leading-relaxed">
-          毎日1曲、あなたの「今日の気分」を<br />
-          仲間とシェアしてタイムラインをアンロック
+        <p className="text-zinc-400 mb-2 text-sm leading-relaxed">
+          1日最大{dailyPostLimit}曲までシェアできます。
+          <span className="mt-1 block font-medium text-zinc-300 tabular-nums">
+            本日 {dailyPostCount}/{dailyPostLimit} 曲シェア済み
+          </span>
+        </p>
+
+        <p className="text-zinc-500 mb-6 text-xs leading-relaxed">
+          Daily limit: {dailyPostLimit} songs. You have {remaining}{' '}
+          {remaining === 1 ? 'share' : 'shares'} left for today.
         </p>
 
         {showCooldownMain ? (
           <p className="text-xs text-zinc-500 mb-4 text-left leading-relaxed">
-            シェアは12時間に1回までです。次にシェアできるまでのあいだ、タイムラインだけ閲覧できます。
+            直近のシェアから12時間は次の投稿ができません。それまでタイムラインだけ閲覧できます。
+            {remaining > 0 ? (
+              <span className="mt-2 block text-zinc-400">
+                ※ 本日の残り枠はあと {remaining} 回です（12時間経過後に利用できます）。
+              </span>
+            ) : null}
           </p>
         ) : null}
 
@@ -111,7 +130,7 @@ export default function LockScreen({
                   </p>
                 ) : null}
                 <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
-                  次のシェアは上記の時刻以降に「曲をシェア」からどうぞ
+                  次のシェアは上の案内に従って、ロック画面の「曲をシェア」からどうぞ
                 </p>
               </motion.div>
             ) : (
@@ -140,10 +159,10 @@ export default function LockScreen({
           </AnimatePresence>
         </div>
 
-        <p className="text-zinc-600 text-xs mt-6">
+        <p className="text-zinc-600 text-xs mt-6 leading-relaxed">
           {shareSongDisabled
-            ? 'シェアのクールダウン中です（上のボタンでタイムラインを開けます）'
-            : '上のボタンから今日の1曲を投稿できます'}
+            ? 'シェアは一時的に制限中です（上のボタンでタイムラインを開けます）'
+            : `本日あと ${remaining} 回シェアできます（上限 ${dailyPostLimit} 回／日）。`}
         </p>
       </motion.div>
     </div>

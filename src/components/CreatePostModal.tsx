@@ -5,9 +5,11 @@ import {
   createPost,
   fetchItunesPreviewForSpotifyTrack,
   fetchLatestPostCreatedAtForUser,
+  fetchTodaysPostCountForUser,
   formatShareCooldownJa,
   getShareCooldownFromLatestPost,
 } from '../lib/api';
+import { DAILY_POST_LIMIT } from '../constants/posting';
 import { getOAuthRedirectTo, supabase } from '../lib/supabase';
 import { POST_CAPTION_MAX_LENGTH } from '../types';
 
@@ -19,6 +21,7 @@ interface CreatePostModalProps {
   spotifyAccessToken: string | null;
   shareSongBlocked: boolean;
   shareCooldownText: string;
+  shareBlockReason?: 'none' | 'cooldown' | 'daily';
 }
 
 export default function CreatePostModal({
@@ -29,6 +32,7 @@ export default function CreatePostModal({
   spotifyAccessToken,
   shareSongBlocked,
   shareCooldownText,
+  shareBlockReason = 'none',
 }: CreatePostModalProps) {
   const [tracks, setTracks] = useState<
     { id: string; name: string; artist: string; albumArt: string; previewUrl: string | null }[]
@@ -104,6 +108,15 @@ export default function CreatePostModal({
     setError(null);
     setIsSubmitting(true);
     try {
+      const todayCount = await fetchTodaysPostCountForUser(userId);
+      if (todayCount >= DAILY_POST_LIMIT) {
+        setError(
+          `本日のシェア上限（${DAILY_POST_LIMIT}回）に達しています。明日またお試しください。`,
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
       const latestIso = await fetchLatestPostCreatedAtForUser(userId);
       const cd = getShareCooldownFromLatestPost(latestIso, Date.now());
       if (cd.blocked) {
@@ -172,7 +185,7 @@ export default function CreatePostModal({
             <div className="w-full max-w-md max-h-[85vh] bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-800 overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
                 <h2 className="text-lg font-semibold text-zinc-50">
-                  今日の1曲をシェア
+                  曲をシェア（1日{DAILY_POST_LIMIT}回まで）
                 </h2>
                 <button
                   type="button"
@@ -188,15 +201,31 @@ export default function CreatePostModal({
               <div className="p-4 flex flex-col min-h-0">
                 {shareSongBlocked && shareCooldownText ? (
                   <div className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 shrink-0">
-                    <p className="text-xs font-semibold text-amber-200/95 mb-1">
-                      12時間に1回までシェアできます
-                    </p>
-                    <p className="text-sm text-amber-100/90 leading-snug">
-                      最後の投稿時刻（データベースの記録）から12時間が経つまで、新しい曲を選べません。
-                    </p>
-                    <p className="text-sm text-amber-300 font-medium mt-2 tabular-nums">
-                      {shareCooldownText}
-                    </p>
+                    {shareBlockReason === 'daily' ? (
+                      <>
+                        <p className="text-xs font-semibold text-amber-200/95 mb-1">
+                          Daily limit: {DAILY_POST_LIMIT} songs (本日の上限)
+                        </p>
+                        <p className="text-sm text-amber-100/90 leading-snug">
+                          本日のシェアは{DAILY_POST_LIMIT}回までです。明日0時（端末の日付）にリセットされます。
+                        </p>
+                        <p className="text-sm text-amber-300 font-medium mt-2 leading-snug">
+                          {shareCooldownText}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs font-semibold text-amber-200/95 mb-1">
+                          12時間に1回までシェアできます
+                        </p>
+                        <p className="text-sm text-amber-100/90 leading-snug">
+                          最後の投稿時刻（データベースの記録）から12時間が経つまで、新しい曲を選べません。
+                        </p>
+                        <p className="text-sm text-amber-300 font-medium mt-2 tabular-nums">
+                          {shareCooldownText}
+                        </p>
+                      </>
+                    )}
                   </div>
                 ) : null}
 

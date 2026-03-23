@@ -25,6 +25,7 @@ import SpotifyPlayer, {
   PREVIEW_UI_DURATION_SEC,
   type SpotifyPlayerHandle,
 } from './SpotifyPlayer';
+import { DAILY_POST_LIMIT } from '../constants/posting';
 
 interface TimelineProps {
   /** UUID or `display_id` for routing (`/@handle` or `/user/uuid`). */
@@ -33,6 +34,7 @@ interface TimelineProps {
   timelineRefreshTrigger?: number;
   shareSongDisabled?: boolean;
   shareCooldownText?: string;
+  shareBlockReason?: 'none' | 'cooldown' | 'daily';
 }
 
 export default function Timeline({
@@ -41,6 +43,7 @@ export default function Timeline({
   timelineRefreshTrigger = 0,
   shareSongDisabled = false,
   shareCooldownText = '',
+  shareBlockReason = 'none',
 }: TimelineProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   /** IO-suggested post (updates often while scrolling). */
@@ -58,7 +61,7 @@ export default function Timeline({
   const [isLoading, setIsLoading] = useState(true);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [hasPostedToday, setHasPostedToday] = useState(false);
+  const [dailyPostCount, setDailyPostCount] = useState(0);
   const [viewTimelineWithoutPostToday, setViewTimelineWithoutPostToday] =
     useState(false);
   const [seedRefreshNonce, setSeedRefreshNonce] = useState(0);
@@ -282,9 +285,9 @@ export default function Timeline({
   }, []);
 
   useEffect(() => {
-    const checkPostedToday = async () => {
+    const loadDailyPostCount = async () => {
       if (!authUserId) {
-        setHasPostedToday(false);
+        setDailyPostCount(0);
         return;
       }
 
@@ -299,28 +302,27 @@ export default function Timeline({
         0,
       );
 
-      const { data, error } = await supabase
+      const { count, error } = await supabase
         .from('posts')
-        .select('id')
+        .select('*', { count: 'exact', head: true })
         .eq('user_id', authUserId)
-        .gte('created_at', startOfToday.toISOString())
-        .limit(1);
+        .gte('created_at', startOfToday.toISOString());
 
       if (error) {
-        console.error('Error checking today post', error);
-        setHasPostedToday(false);
+        console.error('Error counting today posts', error);
+        setDailyPostCount(0);
         return;
       }
 
-      setHasPostedToday((data ?? []).length > 0);
+      setDailyPostCount(count ?? 0);
     };
 
-    checkPostedToday();
+    void loadDailyPostCount();
   }, [authUserId, timelineRefreshTrigger]);
 
   useEffect(() => {
-    if (hasPostedToday) setViewTimelineWithoutPostToday(false);
-  }, [hasPostedToday]);
+    if (dailyPostCount > 0) setViewTimelineWithoutPostToday(false);
+  }, [dailyPostCount]);
 
   useEffect(() => {
     const loadPosts = async () => {
@@ -519,7 +521,11 @@ export default function Timeline({
     );
   }
 
-  if (!hasPostedToday && !viewTimelineWithoutPostToday) {
+  const atDailyCap = dailyPostCount >= DAILY_POST_LIMIT;
+  const showTimelineGate =
+    !atDailyCap && !viewTimelineWithoutPostToday;
+
+  if (showTimelineGate) {
     return (
       <>
         {devSeedButton}
@@ -528,6 +534,8 @@ export default function Timeline({
           shareSongDisabled={shareSongDisabled}
           shareCooldownText={shareCooldownText}
           onViewTimelineWhenCooldown={() => setViewTimelineWithoutPostToday(true)}
+          dailyPostCount={dailyPostCount}
+          dailyPostLimit={DAILY_POST_LIMIT}
         />
       </>
     );
@@ -550,10 +558,13 @@ export default function Timeline({
         {devSeedButton}
         <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
           <div className="max-w-xs text-center text-sm text-zinc-400">
-            24時間以内のシェアはまだありません。あなたが最初の1曲をシェアしませんか？
+            24時間以内のシェアはまだありません。あなたが最初の曲をシェアしませんか？（1日最大
+            {DAILY_POST_LIMIT}回まで）
             {shareSongDisabled && shareCooldownText ? (
               <span className="mt-3 block text-xs text-amber-400/90">
-                {shareCooldownText}
+                {shareBlockReason === 'daily'
+                  ? `本日のシェア上限（${DAILY_POST_LIMIT}回）に達しています。`
+                  : shareCooldownText}
               </span>
             ) : null}
           </div>
@@ -585,9 +596,33 @@ export default function Timeline({
     });
   };
 
+  const showShareAnotherEntry = dailyPostCount < DAILY_POST_LIMIT;
+
   return (
     <>
       {devSeedButton}
+      {showShareAnotherEntry ? (
+        <div className="pointer-events-none fixed left-0 right-0 top-0 z-[25] flex justify-center px-4 pt-[max(0.5rem,env(safe-area-inset-top))]">
+          <button
+            type="button"
+            onClick={() => onShareSong()}
+            title={
+              shareSongDisabled && shareCooldownText
+                ? shareCooldownText
+                : undefined
+            }
+            className={`pointer-events-auto rounded-full border px-4 py-2 text-xs font-semibold shadow-lg backdrop-blur-md transition-colors ${
+              shareSongDisabled
+                ? 'border-zinc-600/60 bg-zinc-950/85 text-zinc-500 hover:bg-zinc-900/90'
+                : 'border-emerald-500/40 bg-zinc-950/90 text-emerald-300 hover:border-emerald-400/60 hover:bg-zinc-900/95 hover:text-emerald-200'
+            }`}
+          >
+            {dailyPostCount === 0
+              ? `曲をシェア（本日 ${dailyPostCount}/${DAILY_POST_LIMIT}）`
+              : `もう1曲シェアする（本日 ${dailyPostCount}/${DAILY_POST_LIMIT}）`}
+          </button>
+        </div>
+      ) : null}
       <PostReplySheet
         postId={replySheetPostId}
         open={replySheetOpen}

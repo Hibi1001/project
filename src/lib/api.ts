@@ -280,6 +280,34 @@ export async function fetchLatestPostCreatedAtForUser(
   return (data as { created_at: string }).created_at ?? null;
 }
 
+/** Count of posts by this user since local midnight today. */
+export async function fetchTodaysPostCountForUser(
+  userId: string,
+): Promise<number> {
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+
+  const { count, error } = await supabase
+    .from('posts')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('created_at', startOfToday.toISOString());
+
+  if (error) {
+    console.error('Error counting today posts', error);
+    return 0;
+  }
+  return count ?? 0;
+}
+
 export function getShareCooldownFromLatestPost(
   latestCreatedAtIso: string | null,
   nowMs: number = Date.now(),
