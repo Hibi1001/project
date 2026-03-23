@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send } from 'lucide-react';
+import { X, Send, Pin } from 'lucide-react';
 import { fetchPostReplies, fetchUserById, insertPostReply } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import type { PostReply } from '../types';
 import { POST_REPLY_MAX_LENGTH } from '../types';
+
+/** Original post “ひとこと” shown pinned above replies (not a `post_replies` row). */
+export interface PostReplySheetPinnedOriginal {
+  caption: string;
+  authorName: string;
+  authorAvatar: string;
+}
 
 interface PostReplySheetProps {
   postId: string | null;
   open: boolean;
   onClose: () => void;
   authUserId: string | null;
+  /** OP caption + author; rendered once at top when `caption` is non-empty. */
+  pinnedOriginal?: PostReplySheetPinnedOriginal | null;
   /** Called after a new reply (local or realtime) so the parent can refresh counts. */
   onReplyCreated?: (postId: string) => void;
 }
@@ -20,6 +29,7 @@ export default function PostReplySheet({
   open,
   onClose,
   authUserId,
+  pinnedOriginal = null,
   onReplyCreated,
 }: PostReplySheetProps) {
   const [replies, setReplies] = useState<PostReply[]>([]);
@@ -119,6 +129,9 @@ export default function PostReplySheet({
     }
   };
 
+  const showPinned =
+    Boolean(pinnedOriginal?.caption?.trim()) && pinnedOriginal != null;
+
   return (
     <AnimatePresence>
       {open && postId ? (
@@ -164,44 +177,79 @@ export default function PostReplySheet({
                 <p className="py-8 text-center text-sm text-zinc-500">
                   読み込み中…
                 </p>
-              ) : replies.length === 0 ? (
-                <p className="py-8 text-center text-sm text-zinc-500">
-                  まだ返信がありません。最初の一言をどうぞ。
-                </p>
               ) : (
-                <ul className="space-y-3 pb-2">
-                  {replies.map((r) => (
-                    <li
-                      key={r.id}
-                      className="flex gap-3 rounded-2xl bg-zinc-800/40 px-3 py-2.5"
+                <div className="space-y-3 pb-2">
+                  {showPinned && pinnedOriginal ? (
+                    <div
+                      className="relative flex gap-3 rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-950/45 to-zinc-900/80 px-3 py-3 shadow-inner shadow-black/20"
+                      aria-label="投稿者のひとこと"
                     >
+                      <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/95">
+                        <Pin className="h-3 w-3" aria-hidden />
+                        OP
+                      </div>
                       <img
                         src={
-                          r.authorAvatar ||
+                          pinnedOriginal.authorAvatar ||
                           'https://placehold.co/40x40/27272a/a1a1aa?text=?'
                         }
                         alt=""
-                        className="h-9 w-9 shrink-0 rounded-full object-cover"
+                        className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-emerald-500/30"
                       />
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 pr-14">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-400/80">
+                          ひとこと
+                        </p>
                         <p className="text-xs font-medium text-emerald-400/90">
-                          {r.authorName}
+                          {pinnedOriginal.authorName}
                         </p>
-                        <p className="mt-0.5 whitespace-pre-wrap text-sm leading-snug text-zinc-200">
-                          {r.content}
-                        </p>
-                        <p className="mt-1 text-[10px] text-zinc-500">
-                          {new Date(r.createdAt).toLocaleString('ja-JP', {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                        <p className="mt-1 whitespace-pre-wrap text-sm leading-snug text-zinc-100">
+                          {pinnedOriginal.caption}
                         </p>
                       </div>
-                    </li>
-                  ))}
-                </ul>
+                    </div>
+                  ) : null}
+
+                  {replies.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-zinc-500">
+                      まだ返信がありません。最初の一言をどうぞ。
+                    </p>
+                  ) : (
+                    <ul className="space-y-3">
+                      {replies.map((r) => (
+                        <li
+                          key={r.id}
+                          className="flex gap-3 rounded-2xl bg-zinc-800/40 px-3 py-2.5"
+                        >
+                          <img
+                            src={
+                              r.authorAvatar ||
+                              'https://placehold.co/40x40/27272a/a1a1aa?text=?'
+                            }
+                            alt=""
+                            className="h-9 w-9 shrink-0 rounded-full object-cover"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium text-emerald-400/90">
+                              {r.authorName}
+                            </p>
+                            <p className="mt-0.5 whitespace-pre-wrap text-sm leading-snug text-zinc-200">
+                              {r.content}
+                            </p>
+                            <p className="mt-1 text-[10px] text-zinc-500">
+                              {new Date(r.createdAt).toLocaleString('ja-JP', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
 

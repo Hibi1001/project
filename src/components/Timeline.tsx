@@ -85,6 +85,22 @@ export default function Timeline({
   const activePost =
     posts.find((p) => p.id === activePostId) ?? posts[0] ?? null;
 
+  const replySheetPost =
+    replySheetPostId != null
+      ? (posts.find((p) => p.id === replySheetPostId) ?? null)
+      : null;
+  const replySheetPostUser = replySheetPost
+    ? usersById[replySheetPost.userId]
+    : undefined;
+  const replySheetCaptionTrimmed = replySheetPost?.caption?.trim() ?? '';
+  const replySheetPinnedOriginal = replySheetCaptionTrimmed
+    ? {
+        caption: replySheetCaptionTrimmed,
+        authorName: replySheetPostUser?.name ?? 'ユーザー',
+        authorAvatar: replySheetPostUser?.avatar ?? '',
+      }
+    : null;
+
   activePostIdRef.current = activePostId;
 
   const scheduleActiveFromScroll = useCallback((postId: string) => {
@@ -577,6 +593,7 @@ export default function Timeline({
         open={replySheetOpen}
         onClose={closeReplySheet}
         authUserId={authUserId}
+        pinnedOriginal={replySheetPinnedOriginal}
         onReplyCreated={(pid) => void syncReplyCount(pid)}
       />
 
@@ -659,17 +676,6 @@ export default function Timeline({
                   <p className="mb-3 text-lg text-zinc-400 sm:text-xl">
                     {post.artist}
                   </p>
-
-                  {post.caption ? (
-                    <div className="mx-auto mt-3 mb-2 max-w-[82%] rounded-2xl border border-white/20 bg-black/40 px-4 py-3 text-left shadow-lg backdrop-blur-md sm:max-w-[88%]">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">
-                        ひとこと
-                      </p>
-                      <p className="mt-1.5 text-sm font-medium leading-relaxed text-white drop-shadow-md">
-                        {post.caption}
-                      </p>
-                    </div>
-                  ) : null}
 
                   <button
                     type="button"
