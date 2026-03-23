@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Music, Lock } from 'lucide-react';
+import { Music, Lock, Plus } from 'lucide-react';
 
 interface LockScreenProps {
   /** Primary action: App = go to timeline; Timeline (can post) = open share modal. */
@@ -130,11 +130,10 @@ export default function LockScreen({
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={onUnlock}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold py-4 px-8 rounded-full shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-shadow"
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold py-4 px-8 rounded-full shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-shadow"
                 >
-                  今日の1曲をシェアして
-                  <br />
-                  タイムラインをアンロック
+                  <Plus className="w-5 h-5" />
+                  <span>曲をシェアしてロックを解除</span>
                 </motion.button>
               </motion.div>
             )}
@@ -144,7 +143,7 @@ export default function LockScreen({
         <p className="text-zinc-600 text-xs mt-6">
           {shareSongDisabled
             ? 'シェアのクールダウン中です（上のボタンでタイムラインを開けます）'
-            : '右下の＋から今日の1曲を投稿できます'}
+            : '上のボタンから今日の1曲を投稿できます'}
         </p>
       </motion.div>
     </div>

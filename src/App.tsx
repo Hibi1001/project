@@ -1,6 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Plus } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import LockScreen from './components/LockScreen';
 import Timeline from './components/Timeline';
 import Profile from './components/Profile';
@@ -189,26 +188,6 @@ function App() {
   const shareSongBlocked = shareCooldown.blocked;
   const shareCooldownLabelJa = formatShareCooldownJa(shareCooldown);
 
-  const shareSongFab = (
-    <motion.button
-      whileHover={shareSongBlocked ? {} : { scale: 1.05 }}
-      whileTap={shareSongBlocked ? {} : { scale: 0.95 }}
-      onClick={shareSongBlocked ? undefined : () => setCreatePostModalOpen(true)}
-      disabled={shareSongBlocked}
-      title={
-        shareSongBlocked && shareCooldownLabelJa ? shareCooldownLabelJa : undefined
-      }
-      className={`fixed bottom-8 right-8 z-50 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ${
-        shareSongBlocked
-          ? 'cursor-not-allowed bg-zinc-700 opacity-50'
-          : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
-      }`}
-      aria-label="曲をシェア"
-    >
-      <Plus className="h-6 w-6" />
-    </motion.button>
-  );
-
   const handleCreatePostSuccess = useCallback(() => {
     setCreatePostModalOpen(false);
     setTimelineRefreshTrigger((t) => t + 1);
@@ -290,14 +269,13 @@ function App() {
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
       <AnimatePresence mode="wait">
         {currentScreen === 'lock' && (
-          <Fragment key="lock">
-            <LockScreen
-              onUnlock={handleUnlock}
-              shareSongDisabled={shareSongBlocked}
-              shareCooldownText={shareCooldownLabelJa}
-            />
-            {shareSongFab}
-          </Fragment>
+          <LockScreen
+            key="lock"
+            onUnlock={() => setCreatePostModalOpen(true)}
+            shareSongDisabled={shareSongBlocked}
+            shareCooldownText={shareCooldownLabelJa}
+            onViewTimelineWhenCooldown={handleUnlock}
+          />
         )}
         {currentScreen === 'timeline' && (
           <Timeline

@@ -7,7 +7,6 @@ import {
   Music2,
   Drum,
   Piano,
-  Plus,
   Play,
   Pause,
   MessageCircle,
@@ -493,26 +492,6 @@ export default function Timeline({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUserId, activePost?.id, posts.length]);
 
-  const shareFab = (
-    <motion.button
-      whileHover={shareSongDisabled ? {} : { scale: 1.05 }}
-      whileTap={shareSongDisabled ? {} : { scale: 0.95 }}
-      onClick={shareSongDisabled ? undefined : onShareSong}
-      disabled={shareSongDisabled}
-      title={
-        shareSongDisabled && shareCooldownText ? shareCooldownText : undefined
-      }
-      className={`fixed bottom-8 right-8 z-50 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ${
-        shareSongDisabled
-          ? 'cursor-not-allowed bg-zinc-700 opacity-50'
-          : 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/30'
-      }`}
-      aria-label="曲をシェア"
-    >
-      <Plus className="h-6 w-6" />
-    </motion.button>
-  );
-
   if (isAuthLoading) {
     return (
       <>
@@ -534,7 +513,6 @@ export default function Timeline({
           shareCooldownText={shareCooldownText}
           onViewTimelineWhenCooldown={() => setViewTimelineWithoutPostToday(true)}
         />
-        {!isAuthLoading && shareFab}
       </>
     );
   }
@@ -835,8 +813,6 @@ export default function Timeline({
 
         </div>
       ) : null}
-
-      {activePost && !isAuthLoading && shareFab}
     </>
   );
 }
