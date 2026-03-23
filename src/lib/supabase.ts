@@ -14,15 +14,28 @@ if (!supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Base URL for Supabase OAuth / magic-link redirects.
- * In the browser: current origin (e.g. http://localhost:5173 in dev, your Vercel URL in prod).
- * Optional override: set VITE_SITE_URL when the public URL is not the same as window.location.origin.
+ * Canonical site origin for Supabase OAuth (e.g. Spotify) redirects.
+ *
+ * **PWA standalone:** The redirect URL must stay within the same origin as your installed app
+ * (`manifest.json` `scope` `/`). If `window.location.origin` ever differs from production (www vs
+ * apex, preview URL, etc.), set `VITE_SITE_URL` to your public URL, e.g.
+ * `https://project-five-pi-66.vercel.app` — and add that exact URL (and `.../`) in Supabase
+ * Dashboard → Authentication → URL configuration → Redirect URLs.
  */
 export function getAuthRedirectBaseUrl(): string {
+  const fromEnv = (import.meta.env.VITE_SITE_URL as string | undefined)
+    ?.trim()
+    .replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }
-  const fromEnv = (import.meta.env.VITE_SITE_URL as string | undefined)?.trim();
-  return fromEnv?.replace(/\/$/, '') ?? '';
+  return '';
+}
+
+/** OAuth `redirectTo`: always root path on the canonical origin (matches manifest `start_url`). */
+export function getOAuthRedirectTo(): string | undefined {
+  const base = getAuthRedirectBaseUrl();
+  return base ? `${base}/` : undefined;
 }
 

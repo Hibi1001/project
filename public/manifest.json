@@ -1,6 +1,6 @@
 {
-  "name": "Feel Now",
-  "short_name": "Feel Now",
+  "name": "My Session",
+  "short_name": "My Session",
   "description": "Share the moment — your session, your sound.",
   "start_url": "/",
   "scope": "/",

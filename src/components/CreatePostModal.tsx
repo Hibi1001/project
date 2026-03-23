@@ -8,7 +8,7 @@ import {
   formatShareCooldownJa,
   getShareCooldownFromLatestPost,
 } from '../lib/api';
-import { getAuthRedirectBaseUrl, supabase } from '../lib/supabase';
+import { getOAuthRedirectTo, supabase } from '../lib/supabase';
 import { POST_CAPTION_MAX_LENGTH } from '../types';
 
 interface CreatePostModalProps {
@@ -213,7 +213,7 @@ export default function CreatePostModal({
                           provider: 'spotify',
                           options: {
                             scopes: 'user-read-recently-played',
-                            redirectTo: getAuthRedirectBaseUrl() || undefined,
+                            redirectTo: getOAuthRedirectTo(),
                           },
                         });
                       }}

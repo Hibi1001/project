@@ -2,13 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-/* PWA / native feel: limit browser rubber-banding & pull-to-refresh bleed */
+/* PWA: full-viewport shell, no document rubber-band; safe area on app root */
 @layer base {
   html {
+    height: 100%;
+    overflow: hidden;
     overscroll-behavior-y: none;
   }
   body {
+    height: 100%;
+    overflow: hidden;
     touch-action: pan-y;
     overscroll-behavior-y: none;
+  }
+  #root {
+    height: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
