@@ -1,0 +1,19 @@
+{
+  "name": "University Light Music SNS",
+  "short_name": "Light Music SNS",
+  "description": "Share today’s song and connect with the light music circle.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
