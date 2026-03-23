@@ -2,23 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-/* PWA: kill document rubber-band / bounce (helps keep standalone chrome hidden) */
+/* PWA: edge-to-edge dark shell — no white gaps on rubber-band / safe areas */
 @layer base {
-  html,
+  html {
+    overscroll-behavior-y: none;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #09090b;
+  }
   body {
     overscroll-behavior-y: none;
     position: fixed;
     width: 100%;
     height: 100%;
     overflow: hidden;
-  }
-  body {
     touch-action: pan-y;
+    background-color: #09090b;
   }
   #root {
     width: 100%;
     height: 100%;
     overflow: hidden;
     box-sizing: border-box;
+    background-color: #09090b;
   }
 }
