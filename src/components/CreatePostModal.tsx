@@ -4,10 +4,7 @@ import { X, Music2 } from 'lucide-react';
 import {
   createPost,
   fetchItunesPreviewForSpotifyTrack,
-  fetchLatestPostCreatedAtForUser,
   fetchTodaysPostCountForUser,
-  formatShareCooldownJa,
-  getShareCooldownFromLatestPost,
 } from '../lib/api';
 import { DAILY_POST_LIMIT } from '../constants/posting';
 import { getOAuthRedirectTo, supabase } from '../lib/supabase';
@@ -20,8 +17,8 @@ interface CreatePostModalProps {
   userId: string;
   spotifyAccessToken: string | null;
   shareSongBlocked: boolean;
-  shareCooldownText: string;
-  shareBlockReason?: 'none' | 'cooldown' | 'daily';
+  /** Shown when `shareSongBlocked` (daily cap reached). */
+  shareLimitMessage: string;
 }
 
 export default function CreatePostModal({
@@ -31,8 +28,7 @@ export default function CreatePostModal({
   userId,
   spotifyAccessToken,
   shareSongBlocked,
-  shareCooldownText,
-  shareBlockReason = 'none',
+  shareLimitMessage,
 }: CreatePostModalProps) {
   const [tracks, setTracks] = useState<
     { id: string; name: string; artist: string; albumArt: string; previewUrl: string | null }[]
@@ -117,14 +113,6 @@ export default function CreatePostModal({
         return;
       }
 
-      const latestIso = await fetchLatestPostCreatedAtForUser(userId);
-      const cd = getShareCooldownFromLatestPost(latestIso, Date.now());
-      if (cd.blocked) {
-        setError(formatShareCooldownJa(cd));
-        setIsSubmitting(false);
-        return;
-      }
-
       // Spotify Web API often omits preview_url now — fill from iTunes silently when missing.
       let previewUrl =
         track.previewUrl?.trim() ? track.previewUrl.trim() : null;
@@ -199,33 +187,17 @@ export default function CreatePostModal({
               </div>
 
               <div className="p-4 flex flex-col min-h-0">
-                {shareSongBlocked && shareCooldownText ? (
+                {shareSongBlocked && shareLimitMessage ? (
                   <div className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 shrink-0">
-                    {shareBlockReason === 'daily' ? (
-                      <>
-                        <p className="text-xs font-semibold text-amber-200/95 mb-1">
-                          Daily limit: {DAILY_POST_LIMIT} songs (本日の上限)
-                        </p>
-                        <p className="text-sm text-amber-100/90 leading-snug">
-                          本日のシェアは{DAILY_POST_LIMIT}回までです。明日0時（端末の日付）にリセットされます。
-                        </p>
-                        <p className="text-sm text-amber-300 font-medium mt-2 leading-snug">
-                          {shareCooldownText}
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-xs font-semibold text-amber-200/95 mb-1">
-                          12時間に1回までシェアできます
-                        </p>
-                        <p className="text-sm text-amber-100/90 leading-snug">
-                          最後の投稿時刻（データベースの記録）から12時間が経つまで、新しい曲を選べません。
-                        </p>
-                        <p className="text-sm text-amber-300 font-medium mt-2 tabular-nums">
-                          {shareCooldownText}
-                        </p>
-                      </>
-                    )}
+                    <p className="text-xs font-semibold text-amber-200/95 mb-1">
+                      Today&apos;s limit: {DAILY_POST_LIMIT} songs
+                    </p>
+                    <p className="text-sm text-amber-100/90 leading-snug">
+                      本日のシェアは{DAILY_POST_LIMIT}回までです。
+                    </p>
+                    <p className="text-sm text-amber-300 font-medium mt-2 leading-snug">
+                      {shareLimitMessage}
+                    </p>
                   </div>
                 ) : null}
 

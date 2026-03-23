@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import LockScreen from './components/LockScreen';
 import Timeline from './components/Timeline';
@@ -6,13 +6,7 @@ import Profile from './components/Profile';
 import CreatePostModal from './components/CreatePostModal';
 import Login from './components/Login';
 import { supabase } from './lib/supabase';
-import {
-  fetchLatestPostCreatedAtForUser,
-  fetchTodaysPostCountForUser,
-  formatShareCooldownJa,
-  getShareCooldownFromLatestPost,
-  isProfileUuid,
-} from './lib/api';
+import { fetchTodaysPostCountForUser, isProfileUuid } from './lib/api';
 import { DAILY_POST_LIMIT } from './constants/posting';
 import type { Session } from '@supabase/supabase-js';
 
@@ -96,11 +90,7 @@ function App() {
   );
   const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
-  const [latestPostCreatedAt, setLatestPostCreatedAt] = useState<string | null>(
-    null,
-  );
   const [todaysPostCount, setTodaysPostCount] = useState(0);
-  const [cooldownTick, setCooldownTick] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -160,19 +150,8 @@ function App() {
   };
 
   const refreshPostingState = useCallback(async (uid: string) => {
-    const [iso, count] = await Promise.all([
-      fetchLatestPostCreatedAtForUser(uid),
-      fetchTodaysPostCountForUser(uid),
-    ]);
-    setLatestPostCreatedAt(iso);
+    const count = await fetchTodaysPostCountForUser(uid);
     setTodaysPostCount(count);
-  }, []);
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setCooldownTick((n) => n + 1);
-    }, 1000);
-    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -188,31 +167,16 @@ function App() {
     void refreshPostingState(uid);
   }, [createPostModalOpen, session?.user?.id, refreshPostingState]);
 
-  const shareCooldown = useMemo(
-    () => getShareCooldownFromLatestPost(latestPostCreatedAt, Date.now()),
-    [latestPostCreatedAt, cooldownTick],
-  );
+  const atDailyLimit = todaysPostCount >= DAILY_POST_LIMIT;
+  const shareSongBlocked = atDailyLimit;
+  const dailyLimitMessageJa = `本日のシェア上限（${DAILY_POST_LIMIT}回）に達しました。明日0時（端末の日付切り替え）にリセットされます。`;
 
-  const shareBlockReason = useMemo(() => {
-    if (todaysPostCount >= DAILY_POST_LIMIT) return 'daily' as const;
-    if (shareCooldown.blocked) return 'cooldown' as const;
-    return 'none' as const;
-  }, [todaysPostCount, shareCooldown.blocked]);
-
-  const shareSongBlocked = shareBlockReason !== 'none';
-
-  const shareCooldownLabelJa = useMemo(() => {
-    if (shareBlockReason === 'daily') {
-      return `本日のシェア上限（${DAILY_POST_LIMIT}回）に達しました。明日0時（端末の日付切り替え）にリセットされます。`;
-    }
-    return formatShareCooldownJa(shareCooldown);
-  }, [shareBlockReason, shareCooldown]);
-
-  /** After posting 3× today, skip app LockScreen and go straight to timeline. */
+  /** 0 posts today → app LockScreen; 1+ posts today → Timeline (gate + “share another” live there). */
   useEffect(() => {
-    if (todaysPostCount < DAILY_POST_LIMIT) return;
     if (currentScreen !== 'lock') return;
-    setCurrentScreen('timeline');
+    if (todaysPostCount >= 1) {
+      setCurrentScreen('timeline');
+    }
   }, [todaysPostCount, currentScreen]);
 
   const handleCreatePostSuccess = useCallback(() => {
@@ -299,11 +263,9 @@ function App() {
           <LockScreen
             key="lock"
             onUnlock={() => setCreatePostModalOpen(true)}
-            shareSongDisabled={shareSongBlocked}
-            shareCooldownText={shareCooldownLabelJa}
-            onViewTimelineWhenCooldown={handleUnlock}
-            dailyPostCount={todaysPostCount}
-            dailyPostLimit={DAILY_POST_LIMIT}
+            onViewTimelineOnly={handleUnlock}
+            slotsUsed={todaysPostCount}
+            slotsLimit={DAILY_POST_LIMIT}
           />
         )}
         {currentScreen === 'timeline' && (
@@ -312,9 +274,6 @@ function App() {
             onViewProfile={handleViewProfile}
             onShareSong={() => setCreatePostModalOpen(true)}
             timelineRefreshTrigger={timelineRefreshTrigger}
-            shareSongDisabled={shareSongBlocked}
-            shareCooldownText={shareCooldownLabelJa}
-            shareBlockReason={shareBlockReason}
           />
         )}
         {currentScreen === 'profile' && selectedProfileSlug && (
@@ -334,8 +293,7 @@ function App() {
         userId={userId}
         spotifyAccessToken={spotifyAccessToken}
         shareSongBlocked={shareSongBlocked}
-        shareCooldownText={shareCooldownLabelJa}
-        shareBlockReason={shareBlockReason}
+        shareLimitMessage={dailyLimitMessageJa}
       />
     </div>
   );

@@ -32,18 +32,14 @@ interface TimelineProps {
   onViewProfile: (profileSlug: string) => void;
   onShareSong: () => void;
   timelineRefreshTrigger?: number;
-  shareSongDisabled?: boolean;
-  shareCooldownText?: string;
-  shareBlockReason?: 'none' | 'cooldown' | 'daily';
 }
+
+type DailyPostRow = { id: string; created_at: string };
 
 export default function Timeline({
   onViewProfile,
   onShareSong,
   timelineRefreshTrigger = 0,
-  shareSongDisabled = false,
-  shareCooldownText = '',
-  shareBlockReason = 'none',
 }: TimelineProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   /** IO-suggested post (updates often while scrolling). */
@@ -61,7 +57,7 @@ export default function Timeline({
   const [isLoading, setIsLoading] = useState(true);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [dailyPostCount, setDailyPostCount] = useState(0);
+  const [dailyPosts, setDailyPosts] = useState<DailyPostRow[]>([]);
   const [viewTimelineWithoutPostToday, setViewTimelineWithoutPostToday] =
     useState(false);
   const [seedRefreshNonce, setSeedRefreshNonce] = useState(0);
@@ -285,9 +281,9 @@ export default function Timeline({
   }, []);
 
   useEffect(() => {
-    const loadDailyPostCount = async () => {
+    const loadTodaysPosts = async () => {
       if (!authUserId) {
-        setDailyPostCount(0);
+        setDailyPosts([]);
         return;
       }
 
@@ -302,27 +298,29 @@ export default function Timeline({
         0,
       );
 
-      const { count, error } = await supabase
+      const { data, error } = await supabase
         .from('posts')
-        .select('*', { count: 'exact', head: true })
+        .select('id, created_at')
         .eq('user_id', authUserId)
-        .gte('created_at', startOfToday.toISOString());
+        .gte('created_at', startOfToday.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(DAILY_POST_LIMIT);
 
       if (error) {
-        console.error('Error counting today posts', error);
-        setDailyPostCount(0);
+        console.error('Error loading today posts', error);
+        setDailyPosts([]);
         return;
       }
 
-      setDailyPostCount(count ?? 0);
+      setDailyPosts((data ?? []) as DailyPostRow[]);
     };
 
-    void loadDailyPostCount();
+    void loadTodaysPosts();
   }, [authUserId, timelineRefreshTrigger]);
 
   useEffect(() => {
-    if (dailyPostCount > 0) setViewTimelineWithoutPostToday(false);
-  }, [dailyPostCount]);
+    if (dailyPosts.length > 0) setViewTimelineWithoutPostToday(false);
+  }, [dailyPosts.length]);
 
   useEffect(() => {
     const loadPosts = async () => {
@@ -521,21 +519,20 @@ export default function Timeline({
     );
   }
 
-  const atDailyCap = dailyPostCount >= DAILY_POST_LIMIT;
-  const showTimelineGate =
-    !atDailyCap && !viewTimelineWithoutPostToday;
+  const fullyLocked = dailyPosts.length >= DAILY_POST_LIMIT;
+  /** First song of the day: must share (or bypass) before seeing the feed. */
+  const showLockGate =
+    dailyPosts.length === 0 && !viewTimelineWithoutPostToday;
 
-  if (showTimelineGate) {
+  if (showLockGate) {
     return (
       <>
         {devSeedButton}
         <LockScreen
           onUnlock={onShareSong}
-          shareSongDisabled={shareSongDisabled}
-          shareCooldownText={shareCooldownText}
-          onViewTimelineWhenCooldown={() => setViewTimelineWithoutPostToday(true)}
-          dailyPostCount={dailyPostCount}
-          dailyPostLimit={DAILY_POST_LIMIT}
+          onViewTimelineOnly={() => setViewTimelineWithoutPostToday(true)}
+          slotsUsed={dailyPosts.length}
+          slotsLimit={DAILY_POST_LIMIT}
         />
       </>
     );
@@ -553,18 +550,30 @@ export default function Timeline({
   }
 
   if (!posts.length) {
+    const showShareCta = dailyPosts.length < DAILY_POST_LIMIT;
     return (
       <>
         {devSeedButton}
+        {showShareCta ? (
+          <div className="pointer-events-none fixed left-0 right-0 top-0 z-[25] flex justify-center px-4 pt-[max(0.5rem,env(safe-area-inset-top))]">
+            <button
+              type="button"
+              onClick={() => onShareSong()}
+              className="pointer-events-auto rounded-full border border-emerald-500/40 bg-zinc-950/90 px-4 py-2 text-xs font-semibold text-emerald-300 shadow-lg backdrop-blur-md transition-colors hover:border-emerald-400/60 hover:bg-zinc-900/95 hover:text-emerald-200"
+            >
+              {dailyPosts.length === 0
+                ? `曲をシェア（本日 ${dailyPosts.length}/${DAILY_POST_LIMIT}）`
+                : `もう1曲シェアする（本日 ${dailyPosts.length}/${DAILY_POST_LIMIT}）`}
+            </button>
+          </div>
+        ) : null}
         <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
           <div className="max-w-xs text-center text-sm text-zinc-400">
             24時間以内のシェアはまだありません。あなたが最初の曲をシェアしませんか？（1日最大
             {DAILY_POST_LIMIT}回まで）
-            {shareSongDisabled && shareCooldownText ? (
+            {fullyLocked ? (
               <span className="mt-3 block text-xs text-amber-400/90">
-                {shareBlockReason === 'daily'
-                  ? `本日のシェア上限（${DAILY_POST_LIMIT}回）に達しています。`
-                  : shareCooldownText}
+                本日のシェア上限（{DAILY_POST_LIMIT}回）に達しています。
               </span>
             ) : null}
           </div>
@@ -596,7 +605,8 @@ export default function Timeline({
     });
   };
 
-  const showShareAnotherEntry = dailyPostCount < DAILY_POST_LIMIT;
+  const showShareAnotherEntry =
+    dailyPosts.length > 0 && dailyPosts.length < DAILY_POST_LIMIT;
 
   return (
     <>
@@ -606,20 +616,9 @@ export default function Timeline({
           <button
             type="button"
             onClick={() => onShareSong()}
-            title={
-              shareSongDisabled && shareCooldownText
-                ? shareCooldownText
-                : undefined
-            }
-            className={`pointer-events-auto rounded-full border px-4 py-2 text-xs font-semibold shadow-lg backdrop-blur-md transition-colors ${
-              shareSongDisabled
-                ? 'border-zinc-600/60 bg-zinc-950/85 text-zinc-500 hover:bg-zinc-900/90'
-                : 'border-emerald-500/40 bg-zinc-950/90 text-emerald-300 hover:border-emerald-400/60 hover:bg-zinc-900/95 hover:text-emerald-200'
-            }`}
+            className="pointer-events-auto rounded-full border border-emerald-500/40 bg-zinc-950/90 px-4 py-2 text-xs font-semibold text-emerald-300 shadow-lg backdrop-blur-md transition-colors hover:border-emerald-400/60 hover:bg-zinc-900/95 hover:text-emerald-200"
           >
-            {dailyPostCount === 0
-              ? `曲をシェア（本日 ${dailyPostCount}/${DAILY_POST_LIMIT}）`
-              : `もう1曲シェアする（本日 ${dailyPostCount}/${DAILY_POST_LIMIT}）`}
+            もう1曲シェアする（本日 {dailyPosts.length}/{DAILY_POST_LIMIT}）
           </button>
         </div>
       ) : null}
