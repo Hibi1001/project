@@ -7,7 +7,7 @@ import {
   Music2,
   Drum,
   Piano,
-  MessageSquare,
+  MessageCircle,
 } from 'lucide-react';
 import { Post, InstrumentType, User } from '../types';
 import {
@@ -656,7 +656,7 @@ export default function Timeline({
               }}
               role="button"
               tabIndex={0}
-              aria-label="つぶやきを開く"
+              aria-label="返信を開く"
             >
               <div
                 className="pointer-events-none absolute inset-0 opacity-20"
@@ -740,8 +740,8 @@ export default function Timeline({
                     }}
                     className="mt-0.5 inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
                   >
-                    <MessageSquare className="h-4 w-4 shrink-0 text-emerald-400/90" />
-                    つぶやき
+                    <MessageCircle className="h-4 w-4 text-emerald-400" />
+                    返信
                     <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs tabular-nums text-zinc-300">
                       {post.replyCount}
                     </span>
