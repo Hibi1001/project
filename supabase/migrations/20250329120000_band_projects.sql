@@ -13,17 +13,17 @@ CREATE INDEX IF NOT EXISTS band_projects_owner_id_idx
 
 CREATE TABLE IF NOT EXISTS public.band_roles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  band_project_id uuid NOT NULL REFERENCES public.band_projects (id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES public.band_projects (id) ON DELETE CASCADE,
   instrument_type text NOT NULL CHECK (
     instrument_type IN ('vocal', 'guitar', 'bass', 'drum', 'keyboard')
   ),
   applicant_id uuid REFERENCES public.users (id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (band_project_id, instrument_type)
+  UNIQUE (project_id, instrument_type)
 );
 
-CREATE INDEX IF NOT EXISTS band_roles_band_project_id_idx
-  ON public.band_roles (band_project_id);
+CREATE INDEX IF NOT EXISTS band_roles_project_id_idx
+  ON public.band_roles (project_id);
 
 CREATE INDEX IF NOT EXISTS band_roles_applicant_id_idx
   ON public.band_roles (applicant_id);
@@ -66,7 +66,7 @@ CREATE POLICY "band_roles_insert_owner"
   WITH CHECK (
     EXISTS (
       SELECT 1 FROM public.band_projects bp
-      WHERE bp.id = band_project_id AND bp.owner_id = auth.uid()
+      WHERE bp.id = project_id AND bp.owner_id = auth.uid()
     )
   );
 
@@ -78,7 +78,7 @@ CREATE POLICY "band_roles_update_claim_open_slot"
     applicant_id IS NULL
     AND EXISTS (
       SELECT 1 FROM public.band_projects bp
-      WHERE bp.id = band_project_id AND bp.owner_id <> auth.uid()
+      WHERE bp.id = project_id AND bp.owner_id <> auth.uid()
     )
   )
   WITH CHECK (applicant_id = auth.uid());

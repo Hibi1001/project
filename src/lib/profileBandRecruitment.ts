@@ -38,7 +38,7 @@ export async function fetchBandProjectsForOwner(
   const { data: roles, error: rErr } = await supabase
     .from('band_roles')
     .select('*')
-    .in('band_project_id', ids);
+    .in('project_id', ids);
 
   if (rErr) {
     console.error('[band_roles] fetch', rErr);
@@ -48,9 +48,9 @@ export async function fetchBandProjectsForOwner(
   const roleRows = (roles ?? []) as DbBandRole[];
   const byProject = new Map<string, DbBandRole[]>();
   for (const r of roleRows) {
-    const list = byProject.get(r.band_project_id) ?? [];
+    const list = byProject.get(r.project_id) ?? [];
     list.push(r);
-    byProject.set(r.band_project_id, list);
+    byProject.set(r.project_id, list);
   }
 
   const applicantIds = [
@@ -119,7 +119,7 @@ export async function createBandProjectWithRoles(params: {
 
   const projectId = (proj as { id: string }).id;
   const rows = params.instruments.map((instrument_type) => ({
-    band_project_id: projectId,
+    project_id: projectId,
     instrument_type,
   }));
 

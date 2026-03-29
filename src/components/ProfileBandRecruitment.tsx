@@ -107,9 +107,9 @@ export default function ProfileBandRecruitment({
         'postgres_changes',
         { event: '*', schema: 'public', table: 'band_roles' },
         (payload) => {
-          const row = payload.new as { band_project_id?: string } | undefined;
-          const oldRow = payload.old as { band_project_id?: string } | undefined;
-          const pid = row?.band_project_id ?? oldRow?.band_project_id;
+          const row = payload.new as { project_id?: string } | undefined;
+          const oldRow = payload.old as { project_id?: string } | undefined;
+          const pid = row?.project_id ?? oldRow?.project_id;
           if (pid && projectIdsRef.current.has(pid)) void reload();
         },
       )

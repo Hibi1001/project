@@ -112,7 +112,7 @@ export interface DbBandProject {
 
 export interface DbBandRole {
   id: string;
-  band_project_id: string;
+  project_id: string;
   instrument_type: InstrumentType;
   applicant_id: string | null;
   created_at: string;
