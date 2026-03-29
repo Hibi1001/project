@@ -5,7 +5,6 @@ import {
   Instagram,
   Link as LinkIcon,
   Music,
-  Users,
   X,
   Zap,
 } from 'lucide-react';
@@ -678,16 +677,6 @@ export default function Profile({
             isOwnProfile={isOwnProfile}
             authUserId={authUserId}
           />
-
-          <div className="mb-8 bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl p-6">
-            <h3 className="text-base font-bold text-amber-400 mb-3 flex items-center gap-2">
-              <Users className="w-5 h-5" />
-              現在募集中のバンド・パート
-            </h3>
-            <p className="text-zinc-300 text-sm leading-relaxed">
-              {user.recruitment}
-            </p>
-          </div>
 
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-4">

@@ -6,6 +6,7 @@ import {
   Music2,
   Piano,
   Plus,
+  Trash2,
   UserPlus,
   X,
 } from 'lucide-react';
@@ -76,6 +77,7 @@ export default function ProfileBandRecruitment({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [claimBusyId, setClaimBusyId] = useState<string | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const projectIdsRef = useRef<Set<string>>(new Set());
@@ -223,7 +225,22 @@ export default function ProfileBandRecruitment({
               layout
               className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 shadow-inner shadow-black/20"
             >
-              <h4 className="text-lg font-bold text-zinc-100">{proj.band_name}</h4>
+              <div className="flex items-start justify-between gap-3">
+                <h4 className="min-w-0 flex-1 text-lg font-bold text-zinc-100">
+                  {proj.band_name}
+                </h4>
+                {authUserId && proj.owner_id === authUserId ? (
+                  <button
+                    type="button"
+                    disabled={deleteBusyId === proj.id}
+                    onClick={() => void handleDeleteProject(proj)}
+                    className="shrink-0 rounded-lg border border-zinc-700/80 bg-zinc-800/60 p-2 text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+                    aria-label="募集を削除"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
               {proj.description ? (
                 <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">
                   {proj.description}

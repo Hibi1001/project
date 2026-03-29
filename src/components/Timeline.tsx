@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   type MouseEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
@@ -19,6 +20,7 @@ import {
 import { Post, InstrumentType, User } from '../types';
 import {
   fetchTimelinePosts,
+  fetchTimelineBandProjects,
   fetchUserById,
   fetchReplyCountForPost,
 } from '../lib/api';
@@ -41,12 +43,37 @@ interface TimelineProps {
 
 type DailyPostRow = { id: string; created_at: string };
 
+type SongFeedItem = {
+  itemType: 'song';
+  created_at: string;
+  post: Post;
+};
+
+type BandFeedItem = {
+  itemType: 'band';
+  created_at: string;
+  id: string;
+  owner_id: string;
+  band_name: string;
+  description: string | null;
+  roles: { instrument_type: InstrumentType }[];
+};
+
+type FeedItem = SongFeedItem | BandFeedItem;
+
 export default function Timeline({
   onViewProfile,
   onShareSong,
   timelineRefreshTrigger = 0,
 }: TimelineProps) {
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
+  const posts = useMemo(
+    () =>
+      feedItems
+        .filter((i): i is SongFeedItem => i.itemType === 'song')
+        .map((i) => i.post),
+    [feedItems],
+  );
   /** IO-suggested post (updates often while scrolling). */
   const [ioPostId, setIoPostId] = useState<string | null>(null);
   /** Debounced + “locked” for audio/reactions; immediate on play tap. */
@@ -86,8 +113,11 @@ export default function Timeline({
     keyboard: Piano,
   };
 
+  /** Only a focused song post drives audio/reactions; `null` when a band card is focused. */
   const activePost =
-    posts.find((p) => p.id === activePostId) ?? posts[0] ?? null;
+    activePostId != null
+      ? (posts.find((p) => p.id === activePostId) ?? null)
+      : null;
 
   const replySheetPost =
     replySheetPostId != null
@@ -182,8 +212,12 @@ export default function Timeline({
       },
     );
 
-    setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, reactions: counts } : p)),
+    setFeedItems((prev) =>
+      prev.map((item) =>
+        item.itemType === 'song' && item.post.id === postId
+          ? { ...item, post: { ...item.post, reactions: counts } }
+          : item,
+      ),
     );
     setUserReactionSet(mine);
   };
@@ -198,21 +232,23 @@ export default function Timeline({
       else next.add(instrument);
       return next;
     });
-    setPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? {
-              ...p,
-              reactions: {
-                ...p.reactions,
-                [instrument]: Math.max(
-                  0,
-                  p.reactions[instrument] + (alreadyReacted ? -1 : 1),
-                ),
-              },
-            }
-          : p,
-      ),
+    setFeedItems((prev) =>
+      prev.map((item) => {
+        if (item.itemType !== 'song' || item.post.id !== postId) return item;
+        return {
+          ...item,
+          post: {
+            ...item.post,
+            reactions: {
+              ...item.post.reactions,
+              [instrument]: Math.max(
+                0,
+                item.post.reactions[instrument] + (alreadyReacted ? -1 : 1),
+              ),
+            },
+          },
+        };
+      }),
     );
 
     const { data: existing, error: existingError } = await supabase
@@ -330,15 +366,42 @@ export default function Timeline({
   useEffect(() => {
     const loadPosts = async () => {
       setIsLoading(true);
-      const data = await fetchTimelinePosts();
+      const [songRows, bandRows] = await Promise.all([
+        fetchTimelinePosts(),
+        fetchTimelineBandProjects(),
+      ]);
       const seen = new Set<string>();
-      const deduped = (data ?? []).filter((p) => {
+      const dedupedSongs = songRows.filter((p) => {
         if (seen.has(p.id)) return false;
         seen.add(p.id);
         return true;
       });
-      setPosts(deduped);
-      const firstId = deduped[0]?.id ?? null;
+
+      const songItems: SongFeedItem[] = dedupedSongs.map((row) => {
+        const { createdAt, ...post } = row;
+        return { itemType: 'song', created_at: createdAt, post };
+      });
+
+      const bandItems: BandFeedItem[] = bandRows.map((b) => ({
+        itemType: 'band',
+        created_at: b.created_at,
+        id: b.id,
+        owner_id: b.owner_id,
+        band_name: b.band_name,
+        description: b.description,
+        roles: b.roles,
+      }));
+
+      const merged = [...songItems, ...bandItems].sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+
+      setFeedItems(merged);
+      const firstSong = merged.find(
+        (i): i is SongFeedItem => i.itemType === 'song',
+      );
+      const firstId = firstSong?.post.id ?? null;
       setIoPostId(firstId);
       setActivePostId(firstId);
       prevStableActiveRef.current = firstId;
@@ -353,14 +416,18 @@ export default function Timeline({
   }, [timelineRefreshTrigger, seedRefreshNonce]);
 
   useEffect(() => {
-    if (posts.length === 0) {
+    if (feedItems.length === 0) {
       setUsersById({});
       return;
     }
     let cancelled = false;
     (async () => {
-      const ids = [...new Set(posts.map((p) => p.userId))];
-      const results = await Promise.all(ids.map((id) => fetchUserById(id)));
+      const ids = new Set<string>();
+      for (const item of feedItems) {
+        if (item.itemType === 'song') ids.add(item.post.userId);
+        else ids.add(item.owner_id);
+      }
+      const results = await Promise.all([...ids].map((id) => fetchUserById(id)));
       if (cancelled) return;
       const next: Record<string, User> = {};
       results.forEach((u) => {
@@ -371,12 +438,11 @@ export default function Timeline({
     return () => {
       cancelled = true;
     };
-  }, [posts]);
+  }, [feedItems]);
 
   useEffect(() => {
-    if (posts.length === 0) return;
     if (activePostId && !posts.some((p) => p.id === activePostId)) {
-      const fallback = posts[0].id;
+      const fallback = posts[0]?.id ?? null;
       setActivePostId(fallback);
       setIoPostId(fallback);
     }
@@ -429,7 +495,7 @@ export default function Timeline({
 
   useEffect(() => {
     const root = scrollRef.current;
-    if (!root || posts.length === 0) return;
+    if (!root || feedItems.length === 0) return;
 
     const ratios = new Map<Element, number>();
     let raf = 0;
@@ -450,11 +516,14 @@ export default function Timeline({
             bestEl = el;
           }
         }
-        const id =
-          bestEl instanceof HTMLElement
-            ? bestEl.dataset.postId ?? null
-            : null;
-        if (id) scheduleActiveFromScroll(id);
+        if (!(bestEl instanceof HTMLElement)) return;
+        const itemType = bestEl.dataset.itemType as 'song' | 'band' | undefined;
+        const postId = bestEl.dataset.postId ?? null;
+        if (itemType === 'band') {
+          focusTimelineFromScroll('band', null);
+        } else if (itemType === 'song' && postId) {
+          focusTimelineFromScroll('song', postId);
+        }
       },
       {
         root,
@@ -473,7 +542,7 @@ export default function Timeline({
       cancelAnimationFrame(raf);
       obs.disconnect();
     };
-  }, [posts, scheduleActiveFromScroll]);
+  }, [feedItems, focusTimelineFromScroll]);
 
   const handleSeedTestData = async () => {
     setIsSeeding(true);
@@ -597,8 +666,13 @@ export default function Timeline({
       return;
     }
     const idx = posts.findIndex((p) => p.id === post.id);
-    const nextPosts = posts.filter((p) => p.id !== post.id);
-    setPosts(nextPosts);
+    const nextFeed = feedItems.filter(
+      (i) => !(i.itemType === 'song' && i.post.id === post.id),
+    );
+    setFeedItems(nextFeed);
+    const nextPosts = nextFeed
+      .filter((i): i is SongFeedItem => i.itemType === 'song')
+      .map((i) => i.post);
     if (replySheetPostId === post.id) closeReplySheet();
     if (nextPosts.length === 0) {
       setActivePostId(null);
@@ -672,16 +746,114 @@ export default function Timeline({
         className="fixed left-0 right-0 top-0 box-border h-[100dvh] w-full snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y bg-zinc-950 pt-[env(safe-area-inset-top,0px)] [-webkit-overflow-scrolling:touch]"
         style={{ scrollSnapType: 'y mandatory' }}
       >
-        {posts.map((post) => {
+        {feedItems.map((item) => {
+          if (item.itemType === 'band') {
+            const owner = usersById[item.owner_id];
+            const ownerSlug = owner?.displayId?.trim()
+              ? owner.displayId
+              : item.owner_id;
+            const bandPosition =
+              feedItems.findIndex(
+                (x) => x.itemType === 'band' && x.id === item.id,
+              ) + 1;
+
+            return (
+              <section
+                key={item.id}
+                data-timeline-post
+                data-item-type="band"
+                data-band-id={item.id}
+                className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-center px-6 pb-40 pt-10"
+                style={{ scrollSnapAlign: 'start' }}
+                aria-label="バンド募集"
+              >
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-900/95 to-emerald-950/35 opacity-[0.92]" />
+                <div className="relative z-10 mx-auto flex w-full max-w-md flex-col items-center gap-3 sm:gap-4">
+                  <div className="relative mx-auto flex aspect-square w-72 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-zinc-900 via-zinc-800 to-emerald-900 shadow-2xl ring-2 ring-emerald-500/25 sm:w-80">
+                    <span className="text-6xl opacity-25" aria-hidden>
+                      🎸
+                    </span>
+                  </div>
+                  <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
+                    <h2 className="text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
+                      {item.band_name}
+                    </h2>
+                    <p className="text-balance text-lg leading-snug text-emerald-400/95 sm:text-xl">
+                      🎸 メンバー募集
+                    </p>
+                    {item.description?.trim() ? (
+                      <div className="w-full max-w-sm px-0.5">
+                        <p className="max-h-[min(28dvh,9.5rem)] overflow-y-auto break-words rounded-2xl border border-white/[0.08] bg-black/40 px-3.5 py-2.5 text-left text-sm font-normal leading-relaxed tracking-wide text-zinc-200/95 shadow-lg [-webkit-overflow-scrolling:touch] backdrop-blur-md sm:max-h-[min(32dvh,12rem)] sm:px-4 sm:text-[0.9375rem]">
+                          {item.description.trim()}
+                        </p>
+                      </div>
+                    ) : null}
+                    {item.roles.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap justify-center gap-3">
+                        {item.roles.map((r) => {
+                          const Icon = instrumentIcons[r.instrument_type];
+                          return (
+                            <div
+                              key={`${item.id}-${r.instrument_type}`}
+                              className="flex h-11 w-11 items-center justify-center rounded-xl border border-emerald-500/30 bg-zinc-950/55 shadow-inner"
+                              title={r.instrument_type}
+                            >
+                              <Icon className="h-5 w-5 text-emerald-400/90" />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                  {owner ? (
+                    <button
+                      type="button"
+                      onClick={() => onViewProfile(ownerSlug)}
+                      className="inline-flex items-center gap-2 text-emerald-400 transition-colors hover:text-emerald-300"
+                    >
+                      <img
+                        src={
+                          owner.avatar || 'https://placehold.co/32x32?text=U'
+                        }
+                        alt={owner.name}
+                        className="h-8 w-8 rounded-full object-cover"
+                      />
+                      <span className="text-sm font-medium">{owner.name}</span>
+                    </button>
+                  ) : (
+                    <p className="text-xs text-zinc-500">プロフィール読込中…</p>
+                  )}
+                </div>
+                <div
+                  className="mx-auto mt-6 w-full max-w-md px-2"
+                  role="presentation"
+                >
+                  <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800/50">
+                    <div className="h-full w-[18%] rounded-full bg-emerald-500/25" />
+                  </div>
+                  <p className="mt-2 text-center text-xs text-zinc-500">
+                    {bandPosition} / {feedItems.length}
+                  </p>
+                </div>
+              </section>
+            );
+          }
+
+          const post = item.post;
           const postUser = usersById[post.userId];
           const profileSlug = postUser?.displayId?.trim()
             ? postUser.displayId
             : post.userId;
+          const songPosition =
+            feedItems.findIndex(
+              (x) => x.itemType === 'song' && x.post.id === post.id,
+            ) + 1;
 
           return (
             <section
               key={post.id}
               data-timeline-post
+              data-item-type="song"
               data-post-id={post.id}
               className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-center px-6 pb-40 pt-10"
               style={{ scrollSnapAlign: 'start' }}
@@ -848,7 +1020,7 @@ export default function Timeline({
                   />
                 </div>
                 <p className="mt-2 text-center text-xs text-zinc-500">
-                  {posts.findIndex((p) => p.id === post.id) + 1} / {posts.length}
+                  {songPosition} / {feedItems.length}
                   {post.id === activePostId && post.previewUrl ? (
                     <span className="ml-2 text-[10px] text-zinc-600">
                       プレビュー最大 {PREVIEW_UI_DURATION_SEC} 秒

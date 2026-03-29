@@ -119,8 +119,20 @@ function mapDbUserToUser(user: DbUser): User {
 
 const TIMELINE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/** Timeline song row including `created_at` for merging with band projects. */
+export type TimelineSongPost = Post & { createdAt: string };
+
+export type TimelineBandProject = {
+  id: string;
+  owner_id: string;
+  band_name: string;
+  description: string | null;
+  created_at: string;
+  roles: { instrument_type: InstrumentType }[];
+};
+
 /** Global timeline: posts from the last 24 hours only (Profile uses its own 7-day window). */
-export async function fetchTimelinePosts(): Promise<Post[]> {
+export async function fetchTimelinePosts(): Promise<TimelineSongPost[]> {
   const sinceIso = new Date(Date.now() - TIMELINE_WINDOW_MS).toISOString();
 
   const { data: postsData, error } = await supabase
@@ -154,13 +166,72 @@ export async function fetchTimelinePosts(): Promise<Post[]> {
 
   const replyCounts = await fetchReplyCountsByPostIds(postIds);
 
-  return (postsData ?? []).map((post) =>
-    mapDbPostToPost(
+  return (postsData ?? []).map((post) => ({
+    ...mapDbPostToPost(
       post,
       reactionsByPostId.get(post.id),
       replyCounts.get(post.id) ?? 0,
     ),
-  );
+    createdAt: post.created_at,
+  }));
+}
+
+/** Band recruitments in the same 24h window as the song timeline. */
+export async function fetchTimelineBandProjects(): Promise<TimelineBandProject[]> {
+  const sinceIso = new Date(Date.now() - TIMELINE_WINDOW_MS).toISOString();
+
+  const { data: projects, error } = await supabase
+    .from('band_projects')
+    .select('id, owner_id, band_name, description, created_at')
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching timeline band_projects', error);
+    return [];
+  }
+
+  const plist = projects ?? [];
+  if (plist.length === 0) return [];
+
+  const ids = plist.map((p) => (p as { id: string }).id);
+  const { data: rolesData, error: rolesError } = await supabase
+    .from('band_roles')
+    .select('project_id, instrument_type')
+    .in('project_id', ids);
+
+  if (rolesError) {
+    console.error('Error fetching timeline band_roles', rolesError);
+  }
+
+  const byProject = new Map<string, { instrument_type: InstrumentType }[]>();
+  for (const r of rolesData ?? []) {
+    const row = r as { project_id: string; instrument_type: string };
+    const list = byProject.get(row.project_id) ?? [];
+    list.push({ instrument_type: row.instrument_type as InstrumentType });
+    byProject.set(row.project_id, list);
+  }
+
+  return plist.map((p) => {
+    const row = p as {
+      id: string;
+      owner_id: string;
+      band_name: string;
+      description: string | null;
+      created_at: string;
+    };
+    const roles = (byProject.get(row.id) ?? []).sort((a, b) =>
+      a.instrument_type.localeCompare(b.instrument_type),
+    );
+    return {
+      id: row.id,
+      owner_id: row.owner_id,
+      band_name: row.band_name,
+      description: row.description,
+      created_at: row.created_at,
+      roles,
+    };
+  });
 }
 
 export async function fetchUserById(userId: string): Promise<User | null> {
