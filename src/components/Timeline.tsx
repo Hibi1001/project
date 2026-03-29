@@ -7,9 +7,7 @@ import {
   Music2,
   Drum,
   Piano,
-  Play,
-  Pause,
-  MessageCircle,
+  MessageSquare,
 } from 'lucide-react';
 import { Post, InstrumentType, User } from '../types';
 import {
@@ -658,7 +656,7 @@ export default function Timeline({
               }}
               role="button"
               tabIndex={0}
-              aria-label="返信を開く"
+              aria-label="つぶやきを開く"
             >
               <div
                 className="pointer-events-none absolute inset-0 opacity-20"
@@ -670,14 +668,8 @@ export default function Timeline({
                 }}
               />
 
-              <div className="relative z-10 mx-auto flex w-full max-w-md flex-col items-center">
-                <div className="relative mx-auto mb-6 w-72 shrink-0 sm:w-80">
-                  <img
-                    src={post.albumArt}
-                    alt={post.songTitle}
-                    className="aspect-square w-full rounded-2xl object-cover shadow-2xl"
-                  />
-                  <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-zinc-950/75 to-transparent" />
+              <div className="relative z-10 mx-auto flex w-full max-w-md flex-col items-center gap-3 sm:gap-4">
+                <div className="relative mx-auto w-72 shrink-0 sm:w-80">
                   {post.previewUrl ? (
                     <button
                       type="button"
@@ -685,31 +677,60 @@ export default function Timeline({
                         e.stopPropagation();
                         handlePlayForPost(post);
                       }}
-                      className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/25 transition-colors hover:bg-black/35"
+                      className={`relative block w-full overflow-hidden rounded-2xl shadow-2xl transition-[transform,box-shadow] duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/45 ${
+                        post.id === activePostId && isPlaying
+                          ? 'scale-[1.02] shadow-[0_0_32px_rgba(16,185,129,0.22)] ring-2 ring-emerald-400/30'
+                          : 'ring-2 ring-transparent'
+                      }`}
+                      aria-pressed={
+                        post.id === activePostId ? isPlaying : false
+                      }
                       aria-label={
                         post.id === activePostId && isPlaying
-                          ? '一時停止'
-                          : '再生'
+                          ? '一時停止（タップ）'
+                          : '再生（タップ）'
                       }
                     >
-                      <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 shadow-lg">
-                        {post.id === activePostId && isPlaying ? (
-                          <Pause className="h-8 w-8 fill-zinc-900 text-zinc-900" />
-                        ) : (
-                          <Play className="ml-1 h-8 w-8 fill-zinc-900 text-zinc-900" />
-                        )}
-                      </span>
+                      <img
+                        src={post.albumArt}
+                        alt={post.songTitle}
+                        className="aspect-square w-full object-cover"
+                      />
+                      <div
+                        className={`pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t transition-opacity duration-300 ${
+                          post.id === activePostId && isPlaying
+                            ? 'from-zinc-950/50 to-transparent opacity-90'
+                            : 'from-zinc-950/70 to-transparent'
+                        }`}
+                      />
                     </button>
-                  ) : null}
+                  ) : (
+                    <div className="relative overflow-hidden rounded-2xl shadow-2xl ring-2 ring-zinc-800/40">
+                      <img
+                        src={post.albumArt}
+                        alt={post.songTitle}
+                        className="aspect-square w-full object-cover"
+                      />
+                      <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-zinc-950/70 to-transparent" />
+                    </div>
+                  )}
                 </div>
 
-                <div className="w-full text-center">
-                  <h2 className="mb-1 text-2xl font-bold text-zinc-50 sm:text-3xl">
+                <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
+                  <h2 className="text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
                     {post.songTitle}
                   </h2>
-                  <p className="mb-3 text-lg text-zinc-400 sm:text-xl">
+                  <p className="text-balance text-lg leading-snug text-zinc-400 sm:text-xl">
                     {post.artist}
                   </p>
+
+                  {post.caption?.trim() ? (
+                    <div className="w-full max-w-sm px-0.5">
+                      <p className="max-h-[min(28dvh,9.5rem)] overflow-y-auto break-words rounded-2xl border border-white/[0.08] bg-black/40 px-3.5 py-2.5 text-left text-sm font-normal leading-relaxed tracking-wide text-zinc-200/95 shadow-lg [-webkit-overflow-scrolling:touch] backdrop-blur-md sm:max-h-[min(32dvh,12rem)] sm:px-4 sm:text-[0.9375rem]">
+                        {post.caption.trim()}
+                      </p>
+                    </div>
+                  ) : null}
 
                   <button
                     type="button"
@@ -717,10 +738,10 @@ export default function Timeline({
                       e.stopPropagation();
                       openReplySheet(post.id);
                     }}
-                    className="mt-5 inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
+                    className="mt-0.5 inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
                   >
-                    <MessageCircle className="h-4 w-4 text-emerald-400" />
-                    返信
+                    <MessageSquare className="h-4 w-4 shrink-0 text-emerald-400/90" />
+                    つぶやき
                     <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs tabular-nums text-zinc-300">
                       {post.replyCount}
                     </span>
@@ -734,7 +755,7 @@ export default function Timeline({
                       e.stopPropagation();
                       onViewProfile(profileSlug);
                     }}
-                    className="mt-5 inline-flex items-center gap-2 text-emerald-400 transition-colors hover:text-emerald-300"
+                    className="inline-flex items-center gap-2 text-emerald-400 transition-colors hover:text-emerald-300"
                   >
                     <img
                       src={postUser.avatar || 'https://placehold.co/32x32?text=U'}
@@ -744,7 +765,7 @@ export default function Timeline({
                     <span className="text-sm font-medium">{postUser.name}</span>
                   </button>
                 ) : (
-                  <p className="mt-5 text-xs text-zinc-500">プロフィール読込中…</p>
+                  <p className="text-xs text-zinc-500">プロフィール読込中…</p>
                 )}
               </div>
 
