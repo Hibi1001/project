@@ -43,23 +43,29 @@ interface TimelineProps {
 
 type DailyPostRow = { id: string; created_at: string };
 
-type SongFeedItem = {
+/** Song post slice in the merged timeline feed (discriminated by `itemType`). */
+type TimelineSongFeedItem = {
   itemType: 'song';
   created_at: string;
   post: Post;
 };
 
-type BandFeedItem = {
+/** Band recruitment slice — `userId` mirrors `owner_id` for shared user-fetch code paths. */
+type TimelineBandProjectFeedItem = {
   itemType: 'band';
   created_at: string;
   id: string;
   owner_id: string;
+  userId: string;
   band_name: string;
   description: string | null;
   roles: { instrument_type: InstrumentType }[];
+  albumArt: null;
+  previewUrl: null;
+  songTitle: string;
 };
 
-type FeedItem = SongFeedItem | BandFeedItem;
+type FeedItem = TimelineSongFeedItem | TimelineBandProjectFeedItem;
 
 export default function Timeline({
   onViewProfile,
@@ -70,7 +76,7 @@ export default function Timeline({
   const posts = useMemo(
     () =>
       feedItems
-        .filter((i): i is SongFeedItem => i.itemType === 'song')
+        .filter((i): i is TimelineSongFeedItem => i.itemType === 'song')
         .map((i) => i.post),
     [feedItems],
   );
@@ -146,6 +152,24 @@ export default function Timeline({
     }, 280);
   }, []);
 
+  const focusTimelineFromScroll = useCallback(
+    (kind: 'song' | 'band', postId: string | null) => {
+      if (kind === 'band') {
+        if (scrollDebounceRef.current) {
+          clearTimeout(scrollDebounceRef.current);
+          scrollDebounceRef.current = null;
+        }
+        setIoPostId(null);
+        setActivePostId(null);
+        setIsPlaying(false);
+        setPreviewProgress(0);
+        return;
+      }
+      if (postId) scheduleActiveFromScroll(postId);
+    },
+    [scheduleActiveFromScroll],
+  );
+
   const setActiveImmediate = useCallback((postId: string) => {
     if (scrollDebounceRef.current) {
       clearTimeout(scrollDebounceRef.current);
@@ -169,8 +193,15 @@ export default function Timeline({
 
   const syncReplyCount = useCallback(async (postId: string) => {
     const c = await fetchReplyCountForPost(postId);
-    setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, replyCount: c } : p)),
+    setFeedItems((prev: FeedItem[]) =>
+      prev.map((feedItem): FeedItem =>
+        feedItem.itemType === 'song' && feedItem.post.id === postId
+          ? {
+              ...feedItem,
+              post: { ...feedItem.post, replyCount: c },
+            }
+          : feedItem,
+      ),
     );
   }, []);
 
@@ -212,8 +243,8 @@ export default function Timeline({
       },
     );
 
-    setFeedItems((prev) =>
-      prev.map((item) =>
+    setFeedItems((prev: FeedItem[]) =>
+      prev.map((item): FeedItem =>
         item.itemType === 'song' && item.post.id === postId
           ? { ...item, post: { ...item.post, reactions: counts } }
           : item,
@@ -232,8 +263,8 @@ export default function Timeline({
       else next.add(instrument);
       return next;
     });
-    setFeedItems((prev) =>
-      prev.map((item) => {
+    setFeedItems((prev: FeedItem[]) =>
+      prev.map((item): FeedItem => {
         if (item.itemType !== 'song' || item.post.id !== postId) return item;
         return {
           ...item,
@@ -377,20 +408,45 @@ export default function Timeline({
         return true;
       });
 
-      const songItems: SongFeedItem[] = dedupedSongs.map((row) => {
+      const songItems: TimelineSongFeedItem[] = dedupedSongs.map((row) => {
         const { createdAt, ...post } = row;
-        return { itemType: 'song', created_at: createdAt, post };
+        const ts =
+          typeof createdAt === 'string' && createdAt.trim()
+            ? createdAt
+            : new Date(0).toISOString();
+        const songItem: TimelineSongFeedItem = {
+          itemType: 'song',
+          created_at: ts,
+          post,
+        };
+        return songItem;
       });
 
-      const bandItems: BandFeedItem[] = bandRows.map((b) => ({
-        itemType: 'band',
-        created_at: b.created_at,
-        id: b.id,
-        owner_id: b.owner_id,
-        band_name: b.band_name,
-        description: b.description,
-        roles: b.roles,
-      }));
+      const bandItems: TimelineBandProjectFeedItem[] = (bandRows ?? [])
+        .filter((b) => Boolean(b?.id && b?.owner_id))
+        .map((b) => {
+          const name = (b.band_name ?? '').trim() || 'バンド募集';
+          const oid = String(b.owner_id).trim();
+          const roles = Array.isArray(b.roles) ? b.roles : [];
+          const ts =
+            typeof b.created_at === 'string' && b.created_at.trim()
+              ? b.created_at
+              : new Date(0).toISOString();
+          const bandItem: TimelineBandProjectFeedItem = {
+            itemType: 'band',
+            created_at: ts,
+            id: b.id,
+            owner_id: oid,
+            userId: oid,
+            band_name: name,
+            description: b.description ?? null,
+            roles,
+            albumArt: null,
+            previewUrl: null,
+            songTitle: name,
+          };
+          return bandItem;
+        });
 
       const merged = [...songItems, ...bandItems].sort(
         (a, b) =>
@@ -399,7 +455,7 @@ export default function Timeline({
 
       setFeedItems(merged);
       const firstSong = merged.find(
-        (i): i is SongFeedItem => i.itemType === 'song',
+        (i): i is TimelineSongFeedItem => i.itemType === 'song',
       );
       const firstId = firstSong?.post.id ?? null;
       setIoPostId(firstId);
@@ -425,7 +481,10 @@ export default function Timeline({
       const ids = new Set<string>();
       for (const item of feedItems) {
         if (item.itemType === 'song') ids.add(item.post.userId);
-        else ids.add(item.owner_id);
+        else {
+          const uid = item.userId || item.owner_id;
+          if (uid) ids.add(uid);
+        }
       }
       const results = await Promise.all([...ids].map((id) => fetchUserById(id)));
       if (cancelled) return;
@@ -671,7 +730,7 @@ export default function Timeline({
     );
     setFeedItems(nextFeed);
     const nextPosts = nextFeed
-      .filter((i): i is SongFeedItem => i.itemType === 'song')
+      .filter((i): i is TimelineSongFeedItem => i.itemType === 'song')
       .map((i) => i.post);
     if (replySheetPostId === post.id) closeReplySheet();
     if (nextPosts.length === 0) {
@@ -748,10 +807,11 @@ export default function Timeline({
       >
         {feedItems.map((item) => {
           if (item.itemType === 'band') {
-            const owner = usersById[item.owner_id];
+            const ownerKey = item.userId || item.owner_id;
+            const owner = ownerKey ? usersById[ownerKey] : undefined;
             const ownerSlug = owner?.displayId?.trim()
               ? owner.displayId
-              : item.owner_id;
+              : ownerKey || '';
             const bandPosition =
               feedItems.findIndex(
                 (x) => x.itemType === 'band' && x.id === item.id,
@@ -776,7 +836,7 @@ export default function Timeline({
                   </div>
                   <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
                     <h2 className="text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
-                      {item.band_name}
+                      {item.band_name || item.songTitle || 'バンド募集'}
                     </h2>
                     <p className="text-balance text-lg leading-snug text-emerald-400/95 sm:text-xl">
                       🎸 メンバー募集
@@ -788,17 +848,18 @@ export default function Timeline({
                         </p>
                       </div>
                     ) : null}
-                    {item.roles.length > 0 ? (
+                    {(item.roles?.length ?? 0) > 0 ? (
                       <div className="mt-1 flex flex-wrap justify-center gap-3">
-                        {item.roles.map((r) => {
-                          const Icon = instrumentIcons[r.instrument_type];
+                        {(item.roles ?? []).map((r) => {
+                          const Inst =
+                            instrumentIcons[r.instrument_type] ?? Music2;
                           return (
                             <div
                               key={`${item.id}-${r.instrument_type}`}
                               className="flex h-11 w-11 items-center justify-center rounded-xl border border-emerald-500/30 bg-zinc-950/55 shadow-inner"
                               title={r.instrument_type}
                             >
-                              <Icon className="h-5 w-5 text-emerald-400/90" />
+                              <Inst className="h-5 w-5 text-emerald-400/90" />
                             </div>
                           );
                         })}
@@ -808,7 +869,7 @@ export default function Timeline({
                   {owner ? (
                     <button
                       type="button"
-                      onClick={() => onViewProfile(ownerSlug)}
+                      onClick={() => onViewProfile(ownerSlug || owner.id)}
                       className="inline-flex items-center gap-2 text-emerald-400 transition-colors hover:text-emerald-300"
                     >
                       <img
@@ -837,6 +898,10 @@ export default function Timeline({
                 </div>
               </section>
             );
+          }
+
+          if (item.itemType !== 'song') {
+            return null;
           }
 
           const post = item.post;
