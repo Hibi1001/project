@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, Pin, Heart, MessageSquareReply } from 'lucide-react';
+import {
+  X,
+  Send,
+  Pin,
+  Heart,
+  MessageSquareReply,
+  Trash2,
+} from 'lucide-react';
 import {
   fetchPostReplies,
   fetchUserById,
@@ -72,6 +79,7 @@ function ReplyThreadNode({
   replyingToId,
   onReply,
   onToggleLike,
+  onDeleteReply,
 }: {
   node: ReplyNode;
   depth: number;
@@ -79,6 +87,7 @@ function ReplyThreadNode({
   replyingToId: string | null;
   onReply: (id: string, authorName: string) => void;
   onToggleLike: (reply: PostReply) => void;
+  onDeleteReply: (reply: PostReply) => void;
 }) {
   const indentLevel = Math.min(depth, 5);
   const isReplyTarget = replyingToId === node.id;
@@ -149,6 +158,20 @@ function ReplyThreadNode({
                 />
                 {node.likeCount}
               </button>
+              {authUserId && node.userId === authUserId ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteReply(node);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full bg-zinc-900/80 px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                  aria-label="削除"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  削除
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -164,6 +187,7 @@ function ReplyThreadNode({
               replyingToId={replyingToId}
               onReply={onReply}
               onToggleLike={onToggleLike}
+              onDeleteReply={onDeleteReply}
             />
           ))}
         </ul>
@@ -264,6 +288,21 @@ export default function PostReplySheet({
       void supabase.removeChannel(channel);
     };
   }, [open, postId, onReplyCreated]);
+
+  const handleDeleteReply = async (reply: PostReply) => {
+    if (!postId || !authUserId || reply.userId !== authUserId) return;
+    if (!window.confirm('本当に削除しますか？')) return;
+    const { error } = await supabase
+      .from('post_replies')
+      .delete()
+      .eq('id', reply.id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    await loadReplies(postId, authUserId);
+    onReplyCreated?.(postId);
+  };
 
   const handleToggleLike = async (reply: PostReply) => {
     if (!authUserId) return;
@@ -413,6 +452,7 @@ export default function PostReplySheet({
                           replyingToId={replyingTo?.id ?? null}
                           onReply={(id, name) => setReplyingTo({ id, name })}
                           onToggleLike={handleToggleLike}
+                          onDeleteReply={(r) => void handleDeleteReply(r)}
                         />
                       ))}
                     </ul>

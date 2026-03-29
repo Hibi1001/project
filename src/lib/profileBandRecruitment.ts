@@ -20,7 +20,7 @@ export async function fetchBandProjectsForOwner(
 }> {
   const { data: projects, error: pErr } = await supabase
     .from('band_projects')
-    .select('*')
+    .select('id, owner_id, band_name, description, created_at')
     .eq('owner_id', ownerUserId)
     .order('created_at', { ascending: false });
 
@@ -107,7 +107,7 @@ export async function createBandProjectWithRoles(params: {
     .from('band_projects')
     .insert({
       owner_id: params.ownerId,
-      name,
+      band_name: name,
       description: params.description.trim() || null,
     })
     .select('id')

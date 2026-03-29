@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS public.band_projects (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_id uuid NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
-  name text NOT NULL,
+  band_name text NOT NULL,
   description text,
   created_at timestamptz NOT NULL DEFAULT now()
 );

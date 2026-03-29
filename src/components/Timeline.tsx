@@ -1,4 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type MouseEvent,
+} from 'react';
 import { flushSync } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
@@ -8,6 +14,7 @@ import {
   Drum,
   Piano,
   MessageCircle,
+  Trash2,
 } from 'lucide-react';
 import { Post, InstrumentType, User } from '../types';
 import {
@@ -580,6 +587,37 @@ export default function Timeline({
     );
   }
 
+  const handleDeletePost = async (post: Post, e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (!authUserId || post.userId !== authUserId) return;
+    if (!window.confirm('本当に削除しますか？')) return;
+    const { error } = await supabase.from('posts').delete().eq('id', post.id);
+    if (error) {
+      console.error('Failed to delete post', error);
+      return;
+    }
+    const idx = posts.findIndex((p) => p.id === post.id);
+    const nextPosts = posts.filter((p) => p.id !== post.id);
+    setPosts(nextPosts);
+    if (replySheetPostId === post.id) closeReplySheet();
+    if (nextPosts.length === 0) {
+      setActivePostId(null);
+      setIoPostId(null);
+      setIsPlaying(false);
+      return;
+    }
+    if (activePostId === post.id) {
+      const replacement =
+        nextPosts[Math.min(idx, nextPosts.length - 1)]?.id ?? nextPosts[0]?.id;
+      setActivePostId(replacement ?? null);
+    }
+    if (ioPostId === post.id) {
+      const replacement =
+        nextPosts[Math.min(idx, nextPosts.length - 1)]?.id ?? nextPosts[0]?.id;
+      setIoPostId(replacement ?? null);
+    }
+  };
+
   const handlePlayForPost = (post: Post) => {
     if (!post.previewUrl) return;
     if (post.id === activePostId && isPlaying) {
@@ -732,20 +770,33 @@ export default function Timeline({
                     </div>
                   ) : null}
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openReplySheet(post.id);
-                    }}
-                    className="mt-0.5 inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
-                  >
-                    <MessageCircle className="h-4 w-4 text-emerald-400" />
-                    返信
-                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs tabular-nums text-zinc-300">
-                      {post.replyCount}
-                    </span>
-                  </button>
+                  <div className="mt-0.5 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openReplySheet(post.id);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 shadow-md backdrop-blur-md transition-colors hover:border-emerald-500/40 hover:bg-zinc-800/90"
+                    >
+                      <MessageCircle className="h-4 w-4 text-emerald-400" />
+                      返信
+                      <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs tabular-nums text-zinc-300">
+                        {post.replyCount}
+                      </span>
+                    </button>
+                    {authUserId && post.userId === authUserId ? (
+                      <button
+                        type="button"
+                        onClick={(e) => void handleDeletePost(post, e)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-zinc-600/80 bg-zinc-900/70 px-3 py-2 text-sm font-medium text-zinc-300 shadow-md backdrop-blur-md transition-colors hover:border-zinc-500 hover:bg-zinc-800/90"
+                        aria-label="削除"
+                      >
+                        <Trash2 className="h-4 w-4 text-zinc-400" />
+                        削除
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 {postUser ? (

@@ -223,7 +223,7 @@ export default function ProfileBandRecruitment({
               layout
               className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 shadow-inner shadow-black/20"
             >
-              <h4 className="text-lg font-bold text-zinc-100">{proj.name}</h4>
+              <h4 className="text-lg font-bold text-zinc-100">{proj.band_name}</h4>
               {proj.description ? (
                 <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">
                   {proj.description}
@@ -388,7 +388,7 @@ export default function ProfileBandRecruitment({
                       onChange={(e) => setBandDesc(e.target.value)}
                       rows={3}
                       className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-100 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-                      placeholder="活動方針・曲風・練習頻度など"
+                      placeholder="何月のライブでやりたい！この曲をやりたい！等々..."
                       maxLength={500}
                       disabled={submitting}
                     />

@@ -105,7 +105,7 @@ export interface DbReaction {
 export interface DbBandProject {
   id: string;
   owner_id: string;
-  name: string;
+  band_name: string;
   description: string | null;
   created_at: string;
 }
