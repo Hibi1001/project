@@ -5,6 +5,7 @@ import Timeline from './components/Timeline';
 import Profile from './components/Profile';
 import CreatePostModal from './components/CreatePostModal';
 import Login from './components/Login';
+import InitialProfileSetup from './components/InitialProfileSetup';
 import { supabase } from './lib/supabase';
 import { fetchTodaysPostCountForUser, isProfileUuid } from './lib/api';
 import { DAILY_POST_LIMIT } from './constants/posting';
@@ -91,6 +92,10 @@ function App() {
   const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
   const [todaysPostCount, setTodaysPostCount] = useState(0);
+  /** Logged-in user must have a non-empty display_name before using the app. */
+  const [profileGate, setProfileGate] = useState<
+    'unknown' | 'ok' | 'setup'
+  >('unknown');
 
   useEffect(() => {
     let mounted = true;
@@ -159,6 +164,39 @@ function App() {
     if (!uid || !passcodeOk) return;
     void refreshPostingState(uid);
   }, [session?.user?.id, passcodeOk, refreshPostingState]);
+
+  const userId = session?.user?.id ?? null;
+
+  useEffect(() => {
+    if (!userId) {
+      setProfileGate('unknown');
+      return;
+    }
+    let cancelled = false;
+    setProfileGate('unknown');
+    void (async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('display_name')
+        .eq('id', userId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        console.error('[profile gate]', error);
+        setProfileGate('setup');
+        return;
+      }
+      if (!data) {
+        setProfileGate('setup');
+        return;
+      }
+      const dn = (data as { display_name?: string | null }).display_name;
+      setProfileGate(dn?.trim() ? 'ok' : 'setup');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
     if (!createPostModalOpen) return;
@@ -239,7 +277,6 @@ function App() {
     );
   }
 
-  const userId = session?.user.id ?? null;
   const spotifyAccessToken =
     // Supabase OAuth sessions expose the provider access token on the session.
     (session as any)?.provider_token ?? null;
@@ -295,6 +332,18 @@ function App() {
         shareSongBlocked={shareSongBlocked}
         shareLimitMessage={dailyLimitMessageJa}
       />
+
+      {userId && profileGate === 'unknown' ? (
+        <div className="fixed inset-0 z-[199] flex items-center justify-center bg-zinc-950/90 backdrop-blur-sm">
+          <p className="text-sm text-zinc-400">プロフィールを確認しています…</p>
+        </div>
+      ) : null}
+      {userId && profileGate === 'setup' ? (
+        <InitialProfileSetup
+          userId={userId}
+          onComplete={() => setProfileGate('ok')}
+        />
+      ) : null}
     </div>
   );
 }

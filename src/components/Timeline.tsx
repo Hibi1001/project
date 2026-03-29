@@ -259,10 +259,11 @@ export default function Timeline({
     setUserReactionSet(mine);
   };
 
-  const toggleReaction = async (postId: string, instrument: InstrumentType) => {
+  const toggleReaction = (postId: string, instrument: InstrumentType) => {
     if (!authUserId) return;
 
     const alreadyReacted = userReactionSet.has(instrument);
+
     setUserReactionSet((prev) => {
       const next = new Set(prev);
       if (alreadyReacted) next.delete(instrument);
@@ -288,44 +289,57 @@ export default function Timeline({
       }),
     );
 
-    const { data: existing, error: existingError } = await supabase
-      .from('reactions')
-      .select('id')
-      .eq('post_id', postId)
-      .eq('user_id', authUserId)
-      .eq('instrument_type', instrument)
-      .maybeSingle();
-
-    if (existingError) {
-      console.error('Error checking reaction', existingError);
-      await refreshReactionsForPost(postId, authUserId);
-      return;
-    }
-
-    if (!existing) {
-      const { error: insertError } = await supabase.from('reactions').insert({
-        post_id: postId,
-        user_id: authUserId,
-        instrument_type: instrument,
-      });
-      if (insertError) {
-        console.error('Error inserting reaction', insertError);
-        await refreshReactionsForPost(postId, authUserId);
-        return;
+    void (async () => {
+      try {
+        if (!alreadyReacted) {
+          const { error: insertError } = await supabase.from('reactions').insert({
+            post_id: postId,
+            user_id: authUserId,
+            instrument_type: instrument,
+          });
+          if (insertError) throw insertError;
+        } else {
+          const { error: deleteError } = await supabase
+            .from('reactions')
+            .delete()
+            .eq('post_id', postId)
+            .eq('user_id', authUserId)
+            .eq('instrument_type', instrument);
+          if (deleteError) throw deleteError;
+        }
+      } catch (err) {
+        console.error('Reaction sync failed', err);
+        setUserReactionSet((prev) => {
+          const next = new Set(prev);
+          if (alreadyReacted) next.add(instrument);
+          else next.delete(instrument);
+          return next;
+        });
+        setFeedItems((prev: FeedItem[]) =>
+          prev.map((item): FeedItem => {
+            if (item.itemType !== 'song' || item.post.id !== postId)
+              return item;
+            return {
+              ...item,
+              post: {
+                ...item.post,
+                reactions: {
+                  ...item.post.reactions,
+                  [instrument]: Math.max(
+                    0,
+                    item.post.reactions[instrument] +
+                      (alreadyReacted ? 1 : -1),
+                  ),
+                },
+              },
+            };
+          }),
+        );
+        window.alert(
+          'リアクションを更新できませんでした。通信状況を確認して、もう一度お試しください。',
+        );
       }
-    } else {
-      const { error: deleteError } = await supabase
-        .from('reactions')
-        .delete()
-        .eq('id', existing.id);
-      if (deleteError) {
-        console.error('Error deleting reaction', deleteError);
-        await refreshReactionsForPost(postId, authUserId);
-        return;
-      }
-    }
-
-    await refreshReactionsForPost(postId, authUserId);
+    })();
   };
 
   useEffect(() => {
@@ -926,15 +940,18 @@ export default function Timeline({
                 data-timeline-post
                 data-item-type="band"
                 data-band-id={item.id}
-                className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-center px-6 pb-40 pt-10"
+                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-40 pt-10"
                 style={{ scrollSnapAlign: 'start' }}
                 aria-label="バンド募集"
               >
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-900/95 to-emerald-950/35 opacity-[0.92]" />
-                <div className="relative z-10 mx-auto flex w-full max-w-md flex-col items-center gap-3 sm:gap-4">
-                  <div className="relative mx-auto flex aspect-square w-72 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-zinc-900 via-zinc-800 to-emerald-900 shadow-2xl ring-2 ring-emerald-500/25 sm:w-80">
-                    <span className="text-6xl opacity-25" aria-hidden>
+                <div className="relative z-10 mx-auto h-auto w-full max-w-md rounded-2xl border border-white/[0.08] bg-zinc-900/55 p-6 shadow-xl ring-1 ring-emerald-500/15 backdrop-blur-md sm:p-7">
+                  <div className="mb-4 flex items-center justify-center gap-2 text-emerald-400/95">
+                    <span className="text-4xl" aria-hidden>
                       🎸
+                    </span>
+                    <span className="text-sm font-semibold tracking-wide">
+                      メンバー募集
                     </span>
                   </div>
                   <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
@@ -956,12 +973,9 @@ export default function Timeline({
                         </button>
                       ) : null}
                     </div>
-                    <p className="text-balance text-lg leading-snug text-emerald-400/95 sm:text-xl">
-                      🎸 メンバー募集
-                    </p>
                     {item.description?.trim() ? (
-                      <div className="w-full max-w-sm px-0.5">
-                        <p className="max-h-[min(28dvh,9.5rem)] overflow-y-auto break-words rounded-2xl border border-white/[0.08] bg-black/40 px-3.5 py-2.5 text-left text-sm font-normal leading-relaxed tracking-wide text-zinc-200/95 shadow-lg [-webkit-overflow-scrolling:touch] backdrop-blur-md sm:max-h-[min(32dvh,12rem)] sm:px-4 sm:text-[0.9375rem]">
+                      <div className="w-full px-0.5">
+                        <p className="break-words rounded-2xl border border-white/[0.08] bg-black/35 px-3.5 py-2.5 text-left text-sm font-normal leading-relaxed tracking-wide text-zinc-200/95 shadow-inner backdrop-blur-sm sm:px-4 sm:text-[0.9375rem]">
                           {item.description.trim()}
                         </p>
                       </div>
