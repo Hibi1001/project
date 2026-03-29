@@ -27,6 +27,8 @@ export interface Post {
   /** Number of rows in `post_replies` for this post. */
   replyCount: number;
   previewUrl?: string;
+  /** When set (new shares), deep link to track in Spotify app/web. */
+  spotifyTrackId?: string | null;
   reactions: {
     vocal: number;
     guitar: number;
@@ -63,6 +65,7 @@ export interface DbPost {
   cover_url?: string | null;
   caption?: string | null;
   created_at: string;
+  spotify_track_id?: string | null;
 }
 
 export interface DbPostReply {

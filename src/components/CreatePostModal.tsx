@@ -127,6 +127,7 @@ export default function CreatePostModal({
         userId,
         trackName: track.name,
         artistName: track.artist,
+        spotifyTrackId: track.id,
         previewUrl,
         coverUrl: track.albumArt,
         caption: caption.trim() || null,

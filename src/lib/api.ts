@@ -50,6 +50,7 @@ function mapDbPostToPost(
     caption: post.caption ?? null,
     replyCount,
     previewUrl: post.preview_url,
+    spotifyTrackId: post.spotify_track_id?.trim() || null,
     reactions: aggregateReactions(reactions),
   };
 }
@@ -582,6 +583,8 @@ export interface CreatePostParams {
   artistName: string;
   previewUrl: string | null;
   coverUrl: string;
+  /** Spotify Web API track id for open.spotify.com deep links. */
+  spotifyTrackId?: string | null;
   /** ひとこと — max {@link POST_CAPTION_MAX_LENGTH} chars. */
   caption?: string | null;
 }
@@ -602,6 +605,7 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
       preview_url: params.previewUrl ?? '',
       cover_url: params.coverUrl,
       caption,
+      spotify_track_id: params.spotifyTrackId?.trim() || null,
     })
     .select()
     .single();
