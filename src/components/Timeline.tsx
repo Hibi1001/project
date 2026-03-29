@@ -16,6 +16,7 @@ import {
   Piano,
   MessageCircle,
   Trash2,
+  User as UserIcon,
 } from 'lucide-react';
 import { Post, InstrumentType, User } from '../types';
 import {
@@ -158,6 +159,33 @@ export default function Timeline({
     );
     return hit ?? null;
   }, [feedItems, activePostId]);
+
+  const myProfileSlug = useMemo(() => {
+    if (!authUserId) return null;
+    const me = usersById[authUserId];
+    if (me?.displayId?.trim()) return me.displayId;
+    return authUserId;
+  }, [authUserId, usersById]);
+
+  const myProfileNav =
+    authUserId && myProfileSlug ? (
+      <button
+        type="button"
+        onClick={() => onViewProfile(myProfileSlug)}
+        className="fixed right-4 z-50 flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-zinc-800 bg-zinc-900/90 shadow-lg backdrop-blur-sm transition-opacity hover:opacity-90 active:scale-[0.98] top-[calc(1rem+env(safe-area-inset-top,0px))]"
+        aria-label="マイプロフィール"
+      >
+        {usersById[authUserId]?.avatar?.trim() ? (
+          <img
+            src={usersById[authUserId].avatar}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <UserIcon className="h-5 w-5 text-zinc-300" strokeWidth={1.75} />
+        )}
+      </button>
+    ) : null;
 
   const replySheetPost =
     replySheetPostId != null
@@ -723,6 +751,7 @@ export default function Timeline({
     return (
       <>
         {devSeedButton}
+        {myProfileNav}
         {showShareCta ? (
           <div className="pointer-events-none fixed left-0 right-0 top-0 z-[25] flex justify-center px-4 pt-[max(0.5rem,env(safe-area-inset-top))]">
             <button
@@ -910,6 +939,7 @@ export default function Timeline({
   return (
     <>
       {devSeedButton}
+      {myProfileNav}
       {showShareAnotherEntry ? (
         <div className="pointer-events-none fixed left-0 right-0 top-0 z-[25] flex justify-center px-4 pt-[max(0.5rem,env(safe-area-inset-top))]">
           <button
