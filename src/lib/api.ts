@@ -122,13 +122,19 @@ const TIMELINE_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Timeline song row including `created_at` for merging with band projects. */
 export type TimelineSongPost = Post & { createdAt: string };
 
+export type TimelineBandRole = {
+  id: string;
+  instrument_type: InstrumentType;
+  applicant_id: string | null;
+};
+
 export type TimelineBandProject = {
   id: string;
   owner_id: string;
   band_name: string;
   description: string | null;
   created_at: string;
-  roles: { instrument_type: InstrumentType }[];
+  roles: TimelineBandRole[];
 };
 
 /** Global timeline: posts from the last 24 hours only (Profile uses its own 7-day window). */
@@ -197,18 +203,27 @@ export async function fetchTimelineBandProjects(): Promise<TimelineBandProject[]
   const ids = plist.map((p) => (p as { id: string }).id);
   const { data: rolesData, error: rolesError } = await supabase
     .from('band_roles')
-    .select('project_id, instrument_type')
+    .select('id, project_id, instrument_type, applicant_id')
     .in('project_id', ids);
 
   if (rolesError) {
     console.error('Error fetching timeline band_roles', rolesError);
   }
 
-  const byProject = new Map<string, { instrument_type: InstrumentType }[]>();
+  const byProject = new Map<string, TimelineBandRole[]>();
   for (const r of rolesData ?? []) {
-    const row = r as { project_id: string; instrument_type: string };
+    const row = r as {
+      id: string;
+      project_id: string;
+      instrument_type: string;
+      applicant_id: string | null;
+    };
     const list = byProject.get(row.project_id) ?? [];
-    list.push({ instrument_type: row.instrument_type as InstrumentType });
+    list.push({
+      id: row.id,
+      instrument_type: row.instrument_type as InstrumentType,
+      applicant_id: row.applicant_id,
+    });
     byProject.set(row.project_id, list);
   }
 

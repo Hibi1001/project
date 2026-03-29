@@ -16,10 +16,11 @@ import {
   useRef,
   useState,
   type ComponentType,
+  type MouseEvent,
 } from 'react';
-import type { InstrumentType } from '../types';
+import type { DbBandRole, InstrumentType } from '../types';
+import { fetchUserById } from '../lib/api';
 import {
-  claimBandRole,
   createBandProjectWithRoles,
   fetchBandProjectsForOwner,
   type ApplicantPreview,
@@ -169,19 +170,116 @@ export default function ProfileBandRecruitment({
     await reload();
   };
 
-  const handleClaim = async (roleId: string) => {
+  const handleDeleteProject = async (
+    proj: BandProjectWithRoles,
+    e: MouseEvent<HTMLButtonElement>,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm('この募集を本当に削除しますか？')) return;
+    setDeleteBusyId(proj.id);
+    const { error } = await supabase
+      .from('band_projects')
+      .delete()
+      .eq('id', proj.id);
+    setDeleteBusyId(null);
+    if (error) {
+      console.error(error);
+      setToast('削除に失敗しました。');
+      return;
+    }
+    setProjects((prev) => prev.filter((p) => p.id !== proj.id));
+    projectIdsRef.current.delete(proj.id);
+  };
+
+  const handleBandRoleClick = async (
+    proj: BandProjectWithRoles,
+    role: DbBandRole,
+    e: MouseEvent<HTMLButtonElement>,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!authUserId) {
       setToast('ログインするとパートに応募できます。');
       return;
     }
-    setClaimBusyId(roleId);
-    const { ok, error } = await claimBandRole(roleId);
-    setClaimBusyId(null);
-    if (!ok) {
-      setToast(error ?? '応募に失敗しました。');
+    if (proj.owner_id === authUserId) {
+      window.alert(
+        '自分の募集には立候補できません（テスト時は別アカウントをご利用ください）',
+      );
       return;
     }
-    await reload();
+    const filled = Boolean(role.applicant_id);
+    const isMine = role.applicant_id === authUserId;
+    if (filled && !isMine) return;
+
+    setClaimBusyId(role.id);
+    try {
+      if (!filled) {
+        const { error } = await supabase
+          .from('band_roles')
+          .update({ applicant_id: authUserId })
+          .eq('id', role.id)
+          .is('applicant_id', null);
+        if (error) {
+          console.error(error);
+          setToast(error.message ?? '応募に失敗しました。');
+          return;
+        }
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id !== proj.id
+              ? p
+              : {
+                  ...p,
+                  roles: p.roles.map((r) =>
+                    r.id === role.id
+                      ? { ...r, applicant_id: authUserId }
+                      : r,
+                  ),
+                },
+          ),
+        );
+        const me = await fetchUserById(authUserId);
+        if (me) {
+          setApplicantsById((prev) => ({
+            ...prev,
+            [me.id]: {
+              id: me.id,
+              name: me.name,
+              avatar: me.avatar,
+            },
+          }));
+        }
+      } else {
+        const { error } = await supabase
+          .from('band_roles')
+          .update({ applicant_id: null })
+          .eq('id', role.id)
+          .eq('applicant_id', authUserId);
+        if (error) {
+          console.error(error);
+          setToast(error.message ?? '取り消しに失敗しました。');
+          return;
+        }
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id !== proj.id
+              ? p
+              : {
+                  ...p,
+                  roles: p.roles.map((r) =>
+                    r.id === role.id
+                      ? { ...r, applicant_id: null }
+                      : r,
+                  ),
+                },
+          ),
+        );
+      }
+    } finally {
+      setClaimBusyId(null);
+    }
   };
 
   useEffect(() => {
@@ -233,7 +331,7 @@ export default function ProfileBandRecruitment({
                   <button
                     type="button"
                     disabled={deleteBusyId === proj.id}
-                    onClick={() => void handleDeleteProject(proj)}
+                    onClick={(e) => void handleDeleteProject(proj, e)}
                     className="shrink-0 rounded-lg border border-zinc-700/80 bg-zinc-800/60 p-2 text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
                     aria-label="募集を削除"
                   >
@@ -258,35 +356,37 @@ export default function ProfileBandRecruitment({
                     : undefined;
                   const isMine =
                     Boolean(authUserId) && role.applicant_id === authUserId;
-                  const ownRecruitmentSlot = isOwnProfile;
-                  const visitorOpenSlot = !filled && !ownRecruitmentSlot;
-                  const disabled =
-                    claimBusyId === role.id || filled || ownRecruitmentSlot;
+                  const isOwner =
+                    Boolean(authUserId) && proj.owner_id === authUserId;
+                  const otherFilled = filled && !isMine;
+                  const disabled = claimBusyId === role.id || otherFilled;
 
                   return (
                     <button
                       key={role.id}
                       type="button"
                       disabled={disabled}
-                      onClick={() => {
-                        if (visitorOpenSlot) void handleClaim(role.id);
-                      }}
+                      onClick={(e) => void handleBandRoleClick(proj, role, e)}
                       className={`group relative flex min-w-[4.5rem] flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 transition-all ${
-                        filled
+                        otherFilled
                           ? 'cursor-default border-zinc-600/50 bg-zinc-800/80'
-                          : ownRecruitmentSlot
-                            ? 'cursor-default border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-90'
-                            : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
-                      }`}
+                          : isOwner
+                            ? 'cursor-pointer border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-90'
+                            : filled && isMine
+                              ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
+                              : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
+                      } disabled:opacity-50`}
                       title={
-                        filled
+                        otherFilled
                           ? applicant?.name
                             ? `${applicant.name}`
                             : '埋まっています'
-                          : ownRecruitmentSlot
-                            ? '募集中の枠（他のユーザーが応募できます）'
+                          : isOwner
+                            ? '自分の募集（タップで案内）'
                             : authUserId
-                              ? 'このパートで参加したい（タップ）'
+                              ? filled && isMine
+                                ? 'タップで応募を取り消す'
+                                : 'このパートで参加したい（タップ）'
                               : 'タップでログインの案内'
                       }
                     >
@@ -312,12 +412,12 @@ export default function ProfileBandRecruitment({
                       <span className="text-[10px] font-medium text-zinc-500">
                         {INSTRUMENT_LABEL[role.instrument_type]}
                       </span>
-                      {!filled && visitorOpenSlot ? (
+                      {!filled && !isOwner ? (
                         <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-500/80">
                           空き
                         </span>
                       ) : null}
-                      {!filled && ownRecruitmentSlot ? (
+                      {!filled && isOwner ? (
                         <span className="text-[9px] font-medium text-zinc-500">
                           募集中
                         </span>

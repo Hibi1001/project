@@ -59,7 +59,11 @@ type TimelineBandProjectFeedItem = {
   userId: string;
   band_name: string;
   description: string | null;
-  roles: { instrument_type: InstrumentType }[];
+  roles: {
+    id: string;
+    instrument_type: InstrumentType;
+    applicant_id: string | null;
+  }[];
   albumArt: null;
   previewUrl: null;
   songTitle: string;
@@ -110,6 +114,8 @@ export default function Timeline({
   const [replySheetPostId, setReplySheetPostId] = useState<string | null>(
     null,
   );
+  const [bandDeleteBusyId, setBandDeleteBusyId] = useState<string | null>(null);
+  const [bandRoleBusyId, setBandRoleBusyId] = useState<string | null>(null);
 
   const instrumentIcons = {
     vocal: Mic,
@@ -484,6 +490,9 @@ export default function Timeline({
         else {
           const uid = item.userId || item.owner_id;
           if (uid) ids.add(uid);
+          for (const r of item.roles) {
+            if (r.applicant_id) ids.add(r.applicant_id);
+          }
         }
       }
       const results = await Promise.all([...ids].map((id) => fetchUserById(id)));
@@ -716,6 +725,7 @@ export default function Timeline({
   }
 
   const handleDeletePost = async (post: Post, e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
     e.stopPropagation();
     if (!authUserId || post.userId !== authUserId) return;
     if (!window.confirm('本当に削除しますか？')) return;
@@ -772,6 +782,99 @@ export default function Timeline({
         ?.querySelector(`[data-post-id="${post.id}"]`)
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
+  };
+
+  const handleDeleteBandFromTimeline = async (
+    bandId: string,
+    e: MouseEvent<HTMLButtonElement>,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!authUserId) return;
+    if (!window.confirm('この募集を本当に削除しますか？')) return;
+    setBandDeleteBusyId(bandId);
+    const { error } = await supabase
+      .from('band_projects')
+      .delete()
+      .eq('id', bandId);
+    setBandDeleteBusyId(null);
+    if (error) {
+      console.error('Failed to delete band project', error);
+      return;
+    }
+    setFeedItems((prev) =>
+      prev.filter((fi) => !(fi.itemType === 'band' && fi.id === bandId)),
+    );
+  };
+
+  const handleBandRoleInTimeline = async (
+    bandItem: TimelineBandProjectFeedItem,
+    role: TimelineBandProjectFeedItem['roles'][number],
+    e: MouseEvent<HTMLButtonElement>,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (bandItem.owner_id === authUserId) {
+      window.alert(
+        '自分の募集には立候補できません（テスト時は別アカウントをご利用ください）',
+      );
+      return;
+    }
+    if (!authUserId) return;
+    const filled = Boolean(role.applicant_id);
+    const isMine = role.applicant_id === authUserId;
+    if (filled && !isMine) return;
+
+    setBandRoleBusyId(role.id);
+    try {
+      if (!filled) {
+        const { error } = await supabase
+          .from('band_roles')
+          .update({ applicant_id: authUserId })
+          .eq('id', role.id)
+          .is('applicant_id', null);
+        if (error) {
+          console.error(error);
+          return;
+        }
+        setFeedItems((prev) =>
+          prev.map((fi): FeedItem => {
+            if (fi.itemType !== 'band' || fi.id !== bandItem.id) return fi;
+            return {
+              ...fi,
+              roles: fi.roles.map((r) =>
+                r.id === role.id ? { ...r, applicant_id: authUserId } : r,
+              ),
+            };
+          }),
+        );
+        const me = await fetchUserById(authUserId);
+        if (me) setUsersById((prev) => ({ ...prev, [me.id]: me }));
+      } else {
+        const { error } = await supabase
+          .from('band_roles')
+          .update({ applicant_id: null })
+          .eq('id', role.id)
+          .eq('applicant_id', authUserId);
+        if (error) {
+          console.error(error);
+          return;
+        }
+        setFeedItems((prev) =>
+          prev.map((fi): FeedItem => {
+            if (fi.itemType !== 'band' || fi.id !== bandItem.id) return fi;
+            return {
+              ...fi,
+              roles: fi.roles.map((r) =>
+                r.id === role.id ? { ...r, applicant_id: null } : r,
+              ),
+            };
+          }),
+        );
+      }
+    } finally {
+      setBandRoleBusyId(null);
+    }
   };
 
   const showShareAnotherEntry =
@@ -835,9 +938,24 @@ export default function Timeline({
                     </span>
                   </div>
                   <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
-                    <h2 className="text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
-                      {item.band_name || item.songTitle || 'バンド募集'}
-                    </h2>
+                    <div className="flex w-full max-w-md items-start justify-between gap-2">
+                      <h2 className="min-w-0 flex-1 text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
+                        {item.band_name || item.songTitle || 'バンド募集'}
+                      </h2>
+                      {authUserId && item.owner_id === authUserId ? (
+                        <button
+                          type="button"
+                          disabled={bandDeleteBusyId === item.id}
+                          onClick={(e) =>
+                            void handleDeleteBandFromTimeline(item.id, e)
+                          }
+                          className="shrink-0 rounded-lg border border-zinc-700/80 bg-zinc-800/60 p-2 text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+                          aria-label="募集を削除"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
                     <p className="text-balance text-lg leading-snug text-emerald-400/95 sm:text-xl">
                       🎸 メンバー募集
                     </p>
@@ -853,14 +971,61 @@ export default function Timeline({
                         {(item.roles ?? []).map((r) => {
                           const Inst =
                             instrumentIcons[r.instrument_type] ?? Music2;
+                          const filled = Boolean(r.applicant_id);
+                          const isMine =
+                            Boolean(authUserId) &&
+                            r.applicant_id === authUserId;
+                          const isOwner =
+                            Boolean(authUserId) &&
+                            item.owner_id === authUserId;
+                          const otherFilled = filled && !isMine;
+                          const disabled =
+                            bandRoleBusyId === r.id || otherFilled;
+                          const applicant = r.applicant_id
+                            ? usersById[r.applicant_id]
+                            : undefined;
                           return (
-                            <div
-                              key={`${item.id}-${r.instrument_type}`}
-                              className="flex h-11 w-11 items-center justify-center rounded-xl border border-emerald-500/30 bg-zinc-950/55 shadow-inner"
+                            <button
+                              key={r.id}
+                              type="button"
+                              disabled={disabled}
+                              onClick={(e) =>
+                                void handleBandRoleInTimeline(item, r, e)
+                              }
+                              className={`group relative flex min-w-[4.5rem] flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 transition-all ${
+                                otherFilled
+                                  ? 'cursor-default border-zinc-600/50 bg-zinc-800/80'
+                                  : isOwner
+                                    ? 'cursor-pointer border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-90'
+                                    : filled && isMine
+                                      ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
+                                      : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
+                              } disabled:opacity-50`}
                               title={r.instrument_type}
                             >
-                              <Inst className="h-5 w-5 text-emerald-400/90" />
-                            </div>
+                              <div className="relative flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50">
+                                <Inst
+                                  className={`h-5 w-5 ${
+                                    filled
+                                      ? 'text-zinc-500'
+                                      : 'text-amber-400/90 group-hover:text-amber-300'
+                                  }`}
+                                />
+                                {filled && applicant ? (
+                                  <img
+                                    src={
+                                      applicant.avatar ||
+                                      'https://placehold.co/64x64?text=U'
+                                    }
+                                    alt=""
+                                    className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full border-2 border-zinc-900 object-cover ring-1 ring-emerald-500/40"
+                                  />
+                                ) : null}
+                              </div>
+                              <span className="text-[10px] font-medium text-zinc-500">
+                                {r.instrument_type}
+                              </span>
+                            </button>
                           );
                         })}
                       </div>
@@ -869,7 +1034,11 @@ export default function Timeline({
                   {owner ? (
                     <button
                       type="button"
-                      onClick={() => onViewProfile(ownerSlug || owner.id)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onViewProfile(ownerSlug || owner.id);
+                      }}
                       className="inline-flex items-center gap-2 text-emerald-400 transition-colors hover:text-emerald-300"
                     >
                       <img
