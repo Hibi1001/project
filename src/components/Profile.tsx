@@ -19,6 +19,7 @@ import {
 } from '../lib/api';
 import type { User, Post } from '../types';
 import { supabase } from '../lib/supabase';
+import ProfileBandRecruitment from './ProfileBandRecruitment';
 
 const SHARED_SONGS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -671,6 +672,12 @@ export default function Profile({
               </div>
             </motion.div>
           )}
+
+          <ProfileBandRecruitment
+            ownerUserId={user.id}
+            isOwnProfile={isOwnProfile}
+            authUserId={authUserId}
+          />
 
           <div className="mb-8 bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-2xl p-6">
             <h3 className="text-base font-bold text-amber-400 mb-3 flex items-center gap-2">
