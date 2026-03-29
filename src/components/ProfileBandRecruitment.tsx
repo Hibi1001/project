@@ -390,28 +390,45 @@ export default function ProfileBandRecruitment({
                               : 'タップでログインの案内'
                       }
                     >
-                      <div className="relative flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50">
-                        <Icon
-                          className={`h-5 w-5 ${
-                            filled
-                              ? 'text-zinc-500'
-                              : 'text-amber-400/90 group-hover:text-amber-300'
-                          }`}
-                        />
+                      <div
+                        className={`relative flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-xl bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50 ${
+                          filled && applicant ? 'ring-emerald-500/25' : ''
+                        }`}
+                      >
                         {filled && applicant ? (
-                          <img
-                            src={
-                              applicant.avatar ||
-                              'https://placehold.co/64x64?text=U'
-                            }
-                            alt=""
-                            className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full border-2 border-zinc-900 object-cover ring-1 ring-emerald-500/40"
+                          <>
+                            <img
+                              src={
+                                applicant.avatar ||
+                                'https://placehold.co/64x64?text=U'
+                              }
+                              alt=""
+                              className="h-8 w-8 rounded-full border-2 border-zinc-900 object-cover ring-2 ring-emerald-500/35"
+                            />
+                            <Icon
+                              className="absolute bottom-0.5 right-0.5 h-4 w-4 text-emerald-400/95 drop-shadow-md"
+                              aria-hidden
+                            />
+                          </>
+                        ) : (
+                          <Icon
+                            className={`h-6 w-6 ${
+                              otherFilled
+                                ? 'text-zinc-500'
+                                : 'text-amber-400/90 group-hover:text-amber-300'
+                            }`}
                           />
-                        ) : null}
+                        )}
                       </div>
-                      <span className="text-[10px] font-medium text-zinc-500">
-                        {INSTRUMENT_LABEL[role.instrument_type]}
-                      </span>
+                      {filled && applicant ? (
+                        <span className="max-w-[5.5rem] truncate text-center text-[10px] font-medium text-zinc-300">
+                          {applicant.name}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-zinc-500">
+                          {INSTRUMENT_LABEL[role.instrument_type]}
+                        </span>
+                      )}
                       {!filled && !isOwner ? (
                         <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-500/80">
                           空き

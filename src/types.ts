@@ -100,6 +100,8 @@ export interface DbReaction {
   post_id: string;
   user_id: string;
   instrument_type: InstrumentType;
+  /** Present when the DB column exists (used for “most recent” ordering). */
+  created_at?: string | null;
 }
 
 export interface DbBandProject {

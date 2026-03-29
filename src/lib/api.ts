@@ -119,8 +119,141 @@ function mapDbUserToUser(user: DbUser): User {
 
 const TIMELINE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/** Who chose each instrument reaction on a post (newest first). */
+export type ReactionParticipantPreview = {
+  userId: string;
+  name: string;
+  avatar: string;
+};
+
+export function emptyReactionParticipants(): Record<
+  InstrumentType,
+  ReactionParticipantPreview[]
+> {
+  return {
+    vocal: [],
+    guitar: [],
+    bass: [],
+    drum: [],
+    keyboard: [],
+  };
+}
+
+type ReactionRow = DbReaction & { created_at?: string | null };
+
+function sortReactionsNewestFirst(rows: ReactionRow[]): void {
+  rows.sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : NaN;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : NaN;
+    if (!Number.isNaN(ta) && !Number.isNaN(tb) && tb !== ta) return tb - ta;
+    return (b.id ?? '').localeCompare(a.id ?? '');
+  });
+}
+
+async function loadReactionUserPreviews(
+  userIds: string[],
+): Promise<Map<string, ReactionParticipantPreview>> {
+  const map = new Map<string, ReactionParticipantPreview>();
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, display_name, avatar_url')
+    .in('id', uniq);
+
+  if (error) {
+    console.error('Error fetching users for reactions', error);
+    return map;
+  }
+
+  for (const u of (data ?? []) as {
+    id: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  }[]) {
+    map.set(u.id, {
+      userId: u.id,
+      name: (u.display_name ?? '').trim() || 'ユーザー',
+      avatar: u.avatar_url ?? '',
+    });
+  }
+  return map;
+}
+
+function participantsFromReactionRows(
+  rows: ReactionRow[],
+  userMap: Map<string, ReactionParticipantPreview>,
+): Record<InstrumentType, ReactionParticipantPreview[]> {
+  const byInst = new Map<InstrumentType, ReactionRow[]>();
+  for (const inst of Object.keys(emptyReactions) as InstrumentType[]) {
+    byInst.set(inst, []);
+  }
+  for (const r of rows) {
+    const inst = r.instrument_type as InstrumentType;
+    if (!byInst.has(inst)) continue;
+    byInst.get(inst)!.push(r);
+  }
+
+  const out = emptyReactionParticipants();
+  for (const inst of Object.keys(emptyReactions) as InstrumentType[]) {
+    const group = [...(byInst.get(inst as InstrumentType) ?? [])];
+    sortReactionsNewestFirst(group);
+    out[inst as InstrumentType] = group
+      .map((r) => userMap.get(r.user_id))
+      .filter((x): x is ReactionParticipantPreview => Boolean(x));
+  }
+  return out;
+}
+
+/** Loads counts, viewer’s instruments, and reactor previews for one post. */
+export async function fetchReactionStateForPost(
+  postId: string,
+  viewerUserId: string,
+): Promise<{
+  counts: Record<InstrumentType, number>;
+  mine: Set<InstrumentType>;
+  participants: Record<InstrumentType, ReactionParticipantPreview[]>;
+} | null> {
+  const { data, error } = await supabase
+    .from('reactions')
+    .select('id, post_id, instrument_type, user_id')
+    .eq('post_id', postId);
+
+  if (error) {
+    console.error('Error fetching reactions for post', error);
+    return null;
+  }
+
+  const rows = (data ?? []) as ReactionRow[];
+  const userMap = await loadReactionUserPreviews(rows.map((r) => r.user_id));
+
+  const counts: Record<InstrumentType, number> = { ...emptyReactions };
+  for (const r of rows) {
+    const k = r.instrument_type as DbInstrument;
+    if (counts[k] !== undefined) counts[k] += 1;
+  }
+
+  const mine = new Set<InstrumentType>();
+  for (const r of rows) {
+    if (r.user_id === viewerUserId) mine.add(r.instrument_type as InstrumentType);
+  }
+
+  return {
+    counts,
+    mine,
+    participants: participantsFromReactionRows(rows, userMap),
+  };
+}
+
 /** Timeline song row including `created_at` for merging with band projects. */
-export type TimelineSongPost = Post & { createdAt: string };
+export type TimelineSongPost = Post & {
+  createdAt: string;
+  reactionParticipants: Record<
+    InstrumentType,
+    ReactionParticipantPreview[]
+  >;
+};
 
 export type TimelineBandRole = {
   id: string;
@@ -156,19 +289,28 @@ export async function fetchTimelinePosts(): Promise<TimelineSongPost[]> {
 
   const { data: reactionsData, error: reactionsError } = await supabase
     .from('reactions')
-    .select('*')
+    .select('id, post_id, instrument_type, user_id')
     .in('post_id', postIds.length > 0 ? postIds : ['']);
 
   if (reactionsError) {
     console.error('Error fetching reactions', reactionsError);
   }
 
+  const allRows = (reactionsData ?? []) as ReactionRow[];
   const reactionsByPostId = new Map<string, DbReaction[]>();
-  (reactionsData ?? []).forEach((reaction) => {
+  allRows.forEach((reaction) => {
     const existing = reactionsByPostId.get(reaction.post_id) ?? [];
     existing.push(reaction);
     reactionsByPostId.set(reaction.post_id, existing);
   });
+
+  const userMap = await loadReactionUserPreviews(allRows.map((r) => r.user_id));
+  const rowsByPostId = new Map<string, ReactionRow[]>();
+  for (const row of allRows) {
+    const list = rowsByPostId.get(row.post_id) ?? [];
+    list.push(row);
+    rowsByPostId.set(row.post_id, list);
+  }
 
   const replyCounts = await fetchReplyCountsByPostIds(postIds);
 
@@ -179,6 +321,10 @@ export async function fetchTimelinePosts(): Promise<TimelineSongPost[]> {
       replyCounts.get(post.id) ?? 0,
     ),
     createdAt: post.created_at,
+    reactionParticipants: participantsFromReactionRows(
+      rowsByPostId.get(post.id) ?? [],
+      userMap,
+    ),
   }));
 }
 

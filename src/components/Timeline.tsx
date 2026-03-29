@@ -23,6 +23,8 @@ import {
   fetchTimelineBandProjects,
   fetchUserById,
   fetchReplyCountForPost,
+  fetchReactionStateForPost,
+  type ReactionParticipantPreview,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { seedTimelineTestData } from '../lib/seedTestData';
@@ -48,6 +50,10 @@ type TimelineSongFeedItem = {
   itemType: 'song';
   created_at: string;
   post: Post;
+  reactionParticipants: Record<
+    InstrumentType,
+    ReactionParticipantPreview[]
+  >;
 };
 
 /** Band recruitment slice — `userId` mirrors `owner_id` for shared user-fetch code paths. */
@@ -116,6 +122,11 @@ export default function Timeline({
   );
   const [bandDeleteBusyId, setBandDeleteBusyId] = useState<string | null>(null);
   const [bandRoleBusyId, setBandRoleBusyId] = useState<string | null>(null);
+  const [reactorSheet, setReactorSheet] = useState<{
+    postId: string;
+    instrument: InstrumentType;
+    participants: ReactionParticipantPreview[];
+  } | null>(null);
 
   const instrumentIcons = {
     vocal: Mic,
@@ -125,11 +136,28 @@ export default function Timeline({
     keyboard: Piano,
   };
 
+  const reactionInstrumentLabel: Record<InstrumentType, string> = {
+    vocal: 'ボーカル',
+    guitar: 'ギター',
+    bass: 'ベース',
+    drum: 'ドラム',
+    keyboard: 'キーボード',
+  };
+
   /** Only a focused song post drives audio/reactions; `null` when a band card is focused. */
   const activePost =
     activePostId != null
       ? (posts.find((p) => p.id === activePostId) ?? null)
       : null;
+
+  const activeSongFeedItem = useMemo((): TimelineSongFeedItem | null => {
+    if (activePostId == null) return null;
+    const hit = feedItems.find(
+      (i): i is TimelineSongFeedItem =>
+        i.itemType === 'song' && i.post.id === activePostId,
+    );
+    return hit ?? null;
+  }, [feedItems, activePostId]);
 
   const replySheetPost =
     replySheetPostId != null
@@ -222,41 +250,21 @@ export default function Timeline({
   };
 
   const refreshReactionsForPost = async (postId: string, userId: string) => {
-    const { data, error } = await supabase
-      .from('reactions')
-      .select('id, instrument_type, user_id')
-      .eq('post_id', postId);
-
-    if (error) {
-      console.error('Error fetching reactions', error);
-      return;
-    }
-
-    const counts: Record<InstrumentType, number> = {
-      vocal: 0,
-      guitar: 0,
-      bass: 0,
-      drum: 0,
-      keyboard: 0,
-    };
-
-    const mine = new Set<InstrumentType>();
-    (data ?? []).forEach(
-      (r: { instrument_type: InstrumentType; user_id: string }) => {
-        if (counts[r.instrument_type] !== undefined)
-          counts[r.instrument_type] += 1;
-        if (r.user_id === userId) mine.add(r.instrument_type);
-      },
-    );
+    const state = await fetchReactionStateForPost(postId, userId);
+    if (!state) return;
 
     setFeedItems((prev: FeedItem[]) =>
       prev.map((item): FeedItem =>
         item.itemType === 'song' && item.post.id === postId
-          ? { ...item, post: { ...item.post, reactions: counts } }
+          ? {
+              ...item,
+              post: { ...item.post, reactions: state.counts },
+              reactionParticipants: state.participants,
+            }
           : item,
       ),
     );
-    setUserReactionSet(mine);
+    setUserReactionSet(state.mine);
   };
 
   const toggleReaction = (postId: string, instrument: InstrumentType) => {
@@ -270,11 +278,35 @@ export default function Timeline({
       else next.add(instrument);
       return next;
     });
+    const selfPreview: ReactionParticipantPreview | null = authUserId
+      ? {
+          userId: authUserId,
+          name: usersById[authUserId]?.name ?? 'あなた',
+          avatar: usersById[authUserId]?.avatar ?? '',
+        }
+      : null;
+
     setFeedItems((prev: FeedItem[]) =>
       prev.map((item): FeedItem => {
         if (item.itemType !== 'song' || item.post.id !== postId) return item;
+        const prevList = item.reactionParticipants[instrument];
+        const nextParticipants: Record<
+          InstrumentType,
+          ReactionParticipantPreview[]
+        > = { ...item.reactionParticipants };
+        if (alreadyReacted) {
+          nextParticipants[instrument] = prevList.filter(
+            (p) => p.userId !== authUserId,
+          );
+        } else if (selfPreview) {
+          nextParticipants[instrument] = [
+            selfPreview,
+            ...prevList.filter((p) => p.userId !== authUserId),
+          ];
+        }
         return {
           ...item,
+          reactionParticipants: nextParticipants,
           post: {
             ...item.post,
             reactions: {
@@ -309,32 +341,7 @@ export default function Timeline({
         }
       } catch (err) {
         console.error('Reaction sync failed', err);
-        setUserReactionSet((prev) => {
-          const next = new Set(prev);
-          if (alreadyReacted) next.add(instrument);
-          else next.delete(instrument);
-          return next;
-        });
-        setFeedItems((prev: FeedItem[]) =>
-          prev.map((item): FeedItem => {
-            if (item.itemType !== 'song' || item.post.id !== postId)
-              return item;
-            return {
-              ...item,
-              post: {
-                ...item.post,
-                reactions: {
-                  ...item.post.reactions,
-                  [instrument]: Math.max(
-                    0,
-                    item.post.reactions[instrument] +
-                      (alreadyReacted ? 1 : -1),
-                  ),
-                },
-              },
-            };
-          }),
-        );
+        await refreshReactionsForPost(postId, authUserId);
         window.alert(
           'リアクションを更新できませんでした。通信状況を確認して、もう一度お試しください。',
         );
@@ -429,7 +436,7 @@ export default function Timeline({
       });
 
       const songItems: TimelineSongFeedItem[] = dedupedSongs.map((row) => {
-        const { createdAt, ...post } = row;
+        const { createdAt, reactionParticipants, ...post } = row;
         const ts =
           typeof createdAt === 'string' && createdAt.trim()
             ? createdAt
@@ -438,6 +445,7 @@ export default function Timeline({
           itemType: 'song',
           created_at: ts,
           post,
+          reactionParticipants,
         };
         return songItem;
       });
@@ -499,9 +507,14 @@ export default function Timeline({
     let cancelled = false;
     (async () => {
       const ids = new Set<string>();
+      if (authUserId) ids.add(authUserId);
       for (const item of feedItems) {
-        if (item.itemType === 'song') ids.add(item.post.userId);
-        else {
+        if (item.itemType === 'song') {
+          ids.add(item.post.userId);
+          for (const p of Object.values(item.reactionParticipants).flat()) {
+            if (p.userId) ids.add(p.userId);
+          }
+        } else {
           const uid = item.userId || item.owner_id;
           if (uid) ids.add(uid);
           for (const r of item.roles) {
@@ -520,7 +533,7 @@ export default function Timeline({
     return () => {
       cancelled = true;
     };
-  }, [feedItems]);
+  }, [feedItems, authUserId]);
 
   useEffect(() => {
     if (activePostId && !posts.some((p) => p.id === activePostId)) {
@@ -1017,28 +1030,50 @@ export default function Timeline({
                               } disabled:opacity-50`}
                               title={r.instrument_type}
                             >
-                              <div className="relative flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50">
-                                <Inst
-                                  className={`h-5 w-5 ${
-                                    filled
-                                      ? 'text-zinc-500'
-                                      : 'text-amber-400/90 group-hover:text-amber-300'
-                                  }`}
-                                />
+                              <div
+                                className={`relative flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-xl bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50 ${
+                                  filled && applicant ? 'ring-emerald-500/25' : ''
+                                }`}
+                                title={
+                                  filled && applicant
+                                    ? applicant.name
+                                    : r.instrument_type
+                                }
+                              >
                                 {filled && applicant ? (
-                                  <img
-                                    src={
-                                      applicant.avatar ||
-                                      'https://placehold.co/64x64?text=U'
-                                    }
-                                    alt=""
-                                    className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full border-2 border-zinc-900 object-cover ring-1 ring-emerald-500/40"
+                                  <>
+                                    <img
+                                      src={
+                                        applicant.avatar ||
+                                        'https://placehold.co/64x64?text=U'
+                                      }
+                                      alt=""
+                                      className="h-8 w-8 rounded-full border-2 border-zinc-900 object-cover ring-2 ring-emerald-500/35"
+                                    />
+                                    <Inst
+                                      className="absolute bottom-0.5 right-0.5 h-4 w-4 text-emerald-400/95 drop-shadow-md"
+                                      aria-hidden
+                                    />
+                                  </>
+                                ) : (
+                                  <Inst
+                                    className={`h-6 w-6 ${
+                                      otherFilled
+                                        ? 'text-zinc-500'
+                                        : 'text-amber-400/90 group-hover:text-amber-300'
+                                    }`}
                                   />
-                                ) : null}
+                                )}
                               </div>
-                              <span className="text-[10px] font-medium text-zinc-500">
-                                {r.instrument_type}
-                              </span>
+                              {filled && applicant ? (
+                                <span className="max-w-[5.5rem] truncate text-center text-[10px] font-medium text-zinc-300">
+                                  {applicant.name}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-medium text-zinc-500">
+                                  {r.instrument_type}
+                                </span>
+                              )}
                             </button>
                           );
                         })}
@@ -1310,38 +1345,137 @@ export default function Timeline({
               const Icon = instrumentIcons[instrument];
               const count = activePost.reactions[instrument];
               const isMine = userReactionSet.has(instrument);
+              const participants =
+                activeSongFeedItem?.reactionParticipants[instrument] ?? [];
+              const stack = participants.slice(0, 3);
               return (
-                <motion.button
+                <div
                   key={instrument}
-                  type="button"
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() =>
-                    toggleReaction(activePost.id, instrument)
-                  }
-                  className="group flex flex-col items-center gap-1"
+                  className="flex flex-col items-center gap-1"
                 >
-                  <div
-                    className={`flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20 ${
-                      isMine
-                        ? 'bg-emerald-500/10 ring-2 ring-emerald-500/60'
-                        : ''
-                    }`}
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() =>
+                      toggleReaction(activePost.id, instrument)
+                    }
+                    className="group flex flex-col items-center"
+                    aria-label={`${reactionInstrumentLabel[instrument]}でリアクション`}
                   >
-                    <Icon
-                      className={`h-6 w-6 transition-colors ${
+                    <div
+                      className={`flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20 ${
                         isMine
-                          ? 'text-emerald-400'
-                          : 'text-zinc-400 group-hover:text-emerald-400'
+                          ? 'bg-emerald-500/10 ring-2 ring-emerald-500/60'
+                          : ''
                       }`}
-                    />
-                  </div>
-                  <span className="text-xs font-semibold text-zinc-400">
-                    {count}
-                  </span>
-                </motion.button>
+                    >
+                      <Icon
+                        className={`h-6 w-6 transition-colors ${
+                          isMine
+                            ? 'text-emerald-400'
+                            : 'text-zinc-400 group-hover:text-emerald-400'
+                        }`}
+                      />
+                    </div>
+                  </motion.button>
+                  <button
+                    type="button"
+                    disabled={count === 0}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (count === 0) return;
+                      setReactorSheet({
+                        postId: activePost.id,
+                        instrument,
+                        participants,
+                      });
+                    }}
+                    title={
+                      count > 0
+                        ? `${reactionInstrumentLabel[instrument]} ${count} 件`
+                        : undefined
+                    }
+                    className="flex min-h-[1.75rem] items-center justify-center gap-1 rounded-lg px-1 disabled:cursor-default disabled:opacity-40"
+                  >
+                    {stack.length > 0 ? (
+                      <div className="flex items-center -space-x-2 pr-0.5">
+                        {stack.map((p, idx) => (
+                          <img
+                            key={`${p.userId}-${idx}`}
+                            src={
+                              p.avatar ||
+                              'https://placehold.co/64x64?text=U'
+                            }
+                            alt=""
+                            className="h-6 w-6 rounded-full border-2 border-zinc-950 object-cover ring-1 ring-zinc-700/90"
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    <span className="text-xs font-semibold tabular-nums text-zinc-400">
+                      {count}
+                    </span>
+                  </button>
+                </div>
               );
             },
           )}
+        </div>
+      ) : null}
+
+      {reactorSheet ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-end justify-center bg-black/65 backdrop-blur-[2px] sm:items-center"
+          role="presentation"
+          onClick={() => setReactorSheet(null)}
+        >
+          <div
+            role="dialog"
+            aria-labelledby="reactor-sheet-title"
+            className="max-h-[min(70dvh,28rem)] w-full max-w-sm overflow-hidden rounded-t-2xl border border-zinc-800 bg-zinc-900 shadow-2xl sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-zinc-800 px-4 py-3">
+              <h2
+                id="reactor-sheet-title"
+                className="text-sm font-semibold text-zinc-100"
+              >
+                {reactionInstrumentLabel[reactorSheet.instrument]} リアクション
+              </h2>
+              <p className="mt-0.5 text-xs text-zinc-500">
+                Reacted by（{reactorSheet.participants.length} 人）
+              </p>
+            </div>
+            <ul className="max-h-[min(50dvh,20rem)] space-y-1 overflow-y-auto p-3">
+              {reactorSheet.participants.map((p) => (
+                <li
+                  key={p.userId}
+                  className="flex items-center gap-3 rounded-xl bg-zinc-950/60 px-2 py-2"
+                >
+                  <img
+                    src={
+                      p.avatar || 'https://placehold.co/64x64?text=U'
+                    }
+                    alt=""
+                    className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-zinc-700/80"
+                  />
+                  <span className="min-w-0 truncate text-sm font-medium text-zinc-200">
+                    {p.name}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="border-t border-zinc-800 p-3">
+              <button
+                type="button"
+                onClick={() => setReactorSheet(null)}
+                className="w-full rounded-xl bg-zinc-800 py-2.5 text-sm font-semibold text-zinc-200 transition-colors hover:bg-zinc-700"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </>
