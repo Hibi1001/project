@@ -78,34 +78,6 @@ type TimelineBandProjectFeedItem = {
 
 type FeedItem = TimelineSongFeedItem | TimelineBandProjectFeedItem;
 
-function postStreamingSearchTerm(post: Post): string {
-  return `${post.songTitle} ${post.artist}`.trim();
-}
-
-function appleMusicSearchUrl(post: Post): string {
-  return `https://music.apple.com/search?term=${encodeURIComponent(postStreamingSearchTerm(post))}`;
-}
-
-function amazonMusicSearchUrl(post: Post): string {
-  return `https://music.amazon.co.jp/search/${encodeURIComponent(postStreamingSearchTerm(post))}`;
-}
-
-/** `spotify_track_id` holds iTunes `trackId` (digits) or legacy Spotify track id. */
-function storeTrackDeepLink(post: Post): { href: string; label: string } | null {
-  const id = post.spotifyTrackId?.trim();
-  if (!id) return null;
-  if (/^\d+$/.test(id)) {
-    return {
-      href: `https://music.apple.com/jp/song?i=${id}`,
-      label: 'Apple Music',
-    };
-  }
-  return {
-    href: `https://open.spotify.com/track/${id}`,
-    label: 'Spotify',
-  };
-}
-
 export default function Timeline({
   onViewProfile,
   onShareSong,
@@ -1185,7 +1157,6 @@ export default function Timeline({
           const profileSlug = postUser?.displayId?.trim()
             ? postUser.displayId
             : post.userId;
-          const trackStoreLink = storeTrackDeepLink(post);
           const songPosition =
             feedItems.findIndex(
               (x) => x.itemType === 'song' && x.post.id === post.id,
@@ -1275,39 +1246,6 @@ export default function Timeline({
                   <p className="text-balance text-lg leading-snug text-zinc-400 sm:text-xl">
                     {post.artist}
                   </p>
-
-                  <div
-                    className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5"
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                  >
-                    <a
-                      href={appleMusicSearchUrl(post)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-zinc-400 transition-colors hover:text-white"
-                    >
-                       Music
-                    </a>
-                    <a
-                      href={amazonMusicSearchUrl(post)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-zinc-400 transition-colors hover:text-white"
-                    >
-                      Amazon Music
-                    </a>
-                    {trackStoreLink ? (
-                      <a
-                        href={trackStoreLink.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-zinc-400 transition-colors hover:text-white"
-                      >
-                        {trackStoreLink.label}
-                      </a>
-                    ) : null}
-                  </div>
 
                   {post.caption?.trim() ? (
                     <div className="w-full max-w-sm px-0.5">

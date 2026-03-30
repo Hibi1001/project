@@ -7,8 +7,16 @@ import {
   searchItunesTracksForPosting,
   type ItunesShareTrack,
 } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { DAILY_POST_LIMIT } from '../constants/posting';
 import { POST_CAPTION_MAX_LENGTH } from '../types';
+
+const DEFAULT_TREND_ARTISTS = [
+  'Ado',
+  'Oasis',
+  'Vaundy',
+  'ASIAN KUNG-FU GENERATION',
+] as const;
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -28,45 +36,118 @@ export default function CreatePostModal({
   shareSongBlocked,
   shareLimitMessage,
 }: CreatePostModalProps) {
-  const [tracks, setTracks] = useState<ItunesShareTrack[]>([]);
+  const [searchTracks, setSearchTracks] = useState<ItunesShareTrack[]>([]);
+  const [recommendedTracks, setRecommendedTracks] = useState<
+    ItunesShareTrack[]
+  >([]);
+  const [recommendedHeading, setRecommendedHeading] = useState<string | null>(
+    null,
+  );
+  const [recommendLoading, setRecommendLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
-  const [searchAttempted, setSearchAttempted] = useState(false);
 
   const runSearch = useCallback(async () => {
     if (!isOpen || shareSongBlocked) return;
     const q = searchQuery.trim();
     if (!q) {
-      setTracks([]);
+      setSearchTracks([]);
       return;
     }
     setIsLoading(true);
-    setSearchAttempted(true);
     setError(null);
     try {
       const list = await searchItunesTracksForPosting(q);
-      setTracks(list);
+      setSearchTracks(list);
       if (list.length === 0) {
         setError('曲が見つかりませんでした。別のキーワードで試してください。');
       }
     } catch {
       setError('検索に失敗しました。もう一度お試しください。');
-      setTracks([]);
+      setSearchTracks([]);
     } finally {
       setIsLoading(false);
     }
   }, [isOpen, searchQuery, shareSongBlocked]);
 
   useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchTracks([]);
+      setError(null);
+    }
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!isOpen || shareSongBlocked || searchQuery.trim()) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      setRecommendLoading(true);
+      try {
+        const { data: rows, error: postError } = await supabase
+          .from('posts')
+          .select('artist_name')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (cancelled) return;
+
+        const artistFromPost =
+          !postError && rows?.[0]?.artist_name?.trim()
+            ? String(rows[0].artist_name).trim()
+            : null;
+
+        let term: string;
+        let heading: string;
+
+        if (artistFromPost) {
+          term = artistFromPost;
+          heading = '最近聴いているアーティスト';
+        } else {
+          term =
+            DEFAULT_TREND_ARTISTS[
+              Math.floor(Math.random() * DEFAULT_TREND_ARTISTS.length)
+            ];
+          heading = 'おすすめのトレンド曲';
+        }
+
+        const list = await searchItunesTracksForPosting(term);
+        if (cancelled) return;
+        setRecommendedTracks(list);
+        setRecommendedHeading(heading);
+      } catch {
+        if (!cancelled) {
+          setRecommendedTracks([]);
+          setRecommendedHeading(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setRecommendLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, shareSongBlocked, userId, searchQuery]);
+
+  useEffect(() => {
     if (!isOpen) {
-      setTracks([]);
+      setSearchTracks([]);
+      setRecommendedTracks([]);
+      setRecommendedHeading(null);
+      setRecommendLoading(false);
       setSearchQuery('');
       setError(null);
       setCaption('');
-      setSearchAttempted(false);
     }
   }, [isOpen]);
 
@@ -95,7 +176,9 @@ export default function CreatePostModal({
         coverUrl: track.albumArt,
         caption: caption.trim() || null,
       });
-      setTracks([]);
+      setSearchTracks([]);
+      setRecommendedTracks([]);
+      setRecommendedHeading(null);
       setSearchQuery('');
       setCaption('');
       onClose();
@@ -110,12 +193,22 @@ export default function CreatePostModal({
   const handleClose = () => {
     if (!isSubmitting) {
       setError(null);
-      setTracks([]);
+      setSearchTracks([]);
+      setRecommendedTracks([]);
+      setRecommendedHeading(null);
       setSearchQuery('');
       setCaption('');
       onClose();
     }
   };
+
+  const isSearchMode = Boolean(searchQuery.trim());
+  const displayTracks = isSearchMode ? searchTracks : recommendedTracks;
+  const listLoading = isSearchMode ? isLoading : recommendLoading;
+  const showRecommendedSectionHeading =
+    !isSearchMode &&
+    Boolean(recommendedHeading) &&
+    recommendedTracks.length > 0;
 
   return (
     <AnimatePresence>
@@ -242,21 +335,24 @@ export default function CreatePostModal({
                       </p>
                     </div>
 
-                    {isLoading ? (
-                      <p className="py-4 text-sm text-zinc-500">検索中…</p>
-                    ) : null}
-                    {!isLoading &&
-                    !searchAttempted &&
-                    !searchQuery.trim() ? (
+                    {listLoading ? (
                       <p className="py-4 text-sm text-zinc-500">
-                        キーワードを入力して「検索」を押してください。
+                        {isSearchMode ? '検索中…' : '読み込み中…'}
                       </p>
                     ) : null}
 
-                    {!isLoading && tracks.length > 0 ? (
+                    {!listLoading &&
+                    showRecommendedSectionHeading &&
+                    recommendedHeading ? (
+                      <p className="mb-2 text-xs font-semibold text-zinc-500">
+                        {recommendedHeading}
+                      </p>
+                    ) : null}
+
+                    {!listLoading && displayTracks.length > 0 ? (
                       <ul className="-mr-1 space-y-1 overflow-y-auto pr-1">
                         <AnimatePresence mode="popLayout">
-                          {tracks.map((track) => (
+                          {displayTracks.map((track) => (
                             <motion.li
                               key={track.id}
                               initial={{ opacity: 0, y: 8 }}
