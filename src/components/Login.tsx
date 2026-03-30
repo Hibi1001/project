@@ -1,251 +1,90 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Music2, LogIn, UserPlus, Loader2 } from 'lucide-react';
+import { Loader2, Music2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
-type Mode = 'signin' | 'signup';
-
 export default function Login() {
-  const [mode, setMode] = useState<Mode>('signin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
-  const logSignUpErrorForDebug = (
-    signUpError: {
-      message: string;
-      name?: string;
-      status?: number;
-      code?: string;
-    },
-    options?: { alsoAlert?: boolean }
-  ) => {
-    const extra: Record<string, unknown> = {};
-    for (const key of Object.keys(signUpError)) {
-      if (!['message', 'name', 'status', 'code'].includes(key)) {
-        try {
-          extra[key] = (signUpError as Record<string, unknown>)[key];
-        } catch {
-          /* skip non-serializable */
-        }
-      }
-    }
-    const payload = {
-      message: signUpError.message,
-      name: signUpError.name,
-      status: signUpError.status,
-      code: signUpError.code,
-      ...extra,
-    };
-    const asJson = JSON.stringify(payload, null, 2);
-    console.error('SignUp error (copy-paste / Postgres hints):', asJson);
-    console.error('SignUp error (raw object):', signUpError);
-    if (options?.alsoAlert) {
-      window.alert(
-        `SignUp error (copy for support):\n\n${asJson}\n\n(Also logged to console.)`
-      );
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSpotifySignIn = async () => {
     setError(null);
-    setMessage(null);
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !password) {
-      setError('メールアドレスとパスワードを入力してください');
-      return;
-    }
-
     setIsSubmitting(true);
     try {
-      if (mode === 'signup') {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email: normalizedEmail,
-          password,
-        });
-
-        console.log('Full SignUp Response:', data, signUpError);
-
-        // No `public.users` write here — nothing from the DB layer should touch this flow.
-        if (signUpError) {
-          const rawMsg = signUpError.message ?? '';
-          const isDatabaseError = rawMsg
-            .toLowerCase()
-            .includes('database error');
-          // Full object in console + optional popup for copy-paste (status/code, etc.)
-          logSignUpErrorForDebug(signUpError, { alsoAlert: true });
-          // Supabase Auth can surface trigger/constraint failures as this generic message
-          if (isDatabaseError) {
-            setMessage(
-              '登録処理を受け付けました。一度ログインを試してみてください。'
-            );
-            setMode('signin');
-            return;
-          }
-          setError(rawMsg);
-          return;
-        }
-
-        setMessage('登録が完了しました！そのままログインしてください。');
-        setMode('signin');
-      } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: normalizedEmail,
-          password,
-        });
-        if (signInError) throw signInError;
-      }
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: 'spotify',
+        options: {
+          redirectTo:
+            typeof window !== 'undefined' ? window.location.origin : undefined,
+          scopes: 'user-read-recently-played',
+        },
+      });
+      if (oauthError) throw oauthError;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '認証に失敗しました';
+      const msg =
+        err instanceof Error ? err.message : 'ログインを開始できませんでした';
       setError(msg);
-    } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-zinc-950 overflow-hidden">
+    <div className="fixed inset-0 overflow-hidden bg-zinc-950">
       <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-950 to-black opacity-90" />
       <div className="absolute inset-0 opacity-10 blur-3xl">
-        <div className="absolute -top-20 -left-20 w-72 h-72 bg-emerald-500/30 rounded-full" />
-        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-teal-500/20 rounded-full" />
+        <div className="absolute -top-20 -left-20 h-72 w-72 rounded-full bg-emerald-500/30" />
+        <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-teal-500/20" />
       </div>
 
-      <div className="relative z-10 h-full flex items-center justify-center px-6">
+      <div className="relative z-10 flex h-full items-center justify-center px-6">
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md"
         >
-          <div className="bg-zinc-900/70 backdrop-blur-md border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800 flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <Music2 className="w-6 h-6 text-white" />
+          <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/70 shadow-2xl backdrop-blur-md">
+            <div className="flex items-center gap-3 border-b border-zinc-800 p-6">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/20">
+                <Music2 className="h-6 w-6 text-white" />
               </div>
               <div>
                 <h1 className="text-xl font-semibold text-zinc-50">
-                  Today’s 1 Song
+                  Today&apos;s 1 Song
                 </h1>
-                <p className="text-zinc-400 text-sm">
-                  1日1曲、気分をシェア
-                </p>
+                <p className="text-sm text-zinc-400">1日1曲、気分をシェア</p>
               </div>
             </div>
 
             <div className="p-6">
-              <div className="flex gap-2 mb-6">
-                <button
-                  type="button"
-                  onClick={() => setMode('signin')}
-                  className={`flex-1 py-2.5 rounded-full text-sm font-semibold transition-colors border ${
-                    mode === 'signin'
-                      ? 'bg-zinc-50 text-zinc-950 border-zinc-50'
-                      : 'bg-zinc-800/50 text-zinc-200 border-zinc-700 hover:bg-zinc-800'
-                  }`}
-                >
-                  ログイン
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('signup')}
-                  className={`flex-1 py-2.5 rounded-full text-sm font-semibold transition-colors border ${
-                    mode === 'signup'
-                      ? 'bg-zinc-50 text-zinc-950 border-zinc-50'
-                      : 'bg-zinc-800/50 text-zinc-200 border-zinc-700 hover:bg-zinc-800'
-                  }`}
-                >
-                  新規登録
-                </button>
-              </div>
-
-              {error && (
-                <p className="text-sm text-red-400 bg-red-400/10 rounded-xl px-4 py-3 mb-4">
+              {error ? (
+                <p className="mb-4 rounded-xl bg-red-400/10 px-4 py-3 text-sm text-red-400">
                   {error}
                 </p>
-              )}
-              {message && (
-                <p className="text-sm text-emerald-300 bg-emerald-400/10 rounded-xl px-4 py-3 mb-4">
-                  {message}
-                </p>
-              )}
+              ) : null}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label
-                    htmlFor="email"
-                    className="block text-sm font-medium text-zinc-400 mb-2"
-                  >
-                    Email
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-                    disabled={isSubmitting}
-                  />
-                </div>
+              <p className="mb-4 text-center text-sm leading-relaxed text-zinc-400">
+                続行するには Spotify アカウントでサインインしてください。
+              </p>
 
-                <div>
-                  <label
-                    htmlFor="password"
-                    className="block text-sm font-medium text-zinc-400 mb-2"
-                  >
-                    Password
-                  </label>
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete={
-                      mode === 'signup' ? 'new-password' : 'current-password'
-                    }
-                    placeholder="••••••••"
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-                    disabled={isSubmitting}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting || !email.trim() || !password}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all inline-flex items-center justify-center gap-2"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>処理中...</span>
-                    </>
-                  ) : mode === 'signup' ? (
-                    <>
-                      <UserPlus className="w-5 h-5" />
-                      <span>新規登録</span>
-                    </>
-                  ) : (
-                    <>
-                      <LogIn className="w-5 h-5" />
-                      <span>ログイン</span>
-                    </>
-                  )}
-                </button>
-              </form>
-
-              <div className="mt-6 text-xs text-zinc-500 leading-relaxed">
-                {mode === 'signup' ? (
-                  <p>
-                    新規登録後、設定によってはメール認証が必要です。届かない場合は迷惑メールも確認してください。
-                  </p>
+              <button
+                type="button"
+                onClick={() => void handleSpotifySignIn()}
+                disabled={isSubmitting}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1DB954] py-3.5 px-6 text-base font-bold text-white shadow-lg shadow-black/30 transition-all hover:bg-[#1ed760] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span>接続中…</span>
+                  </>
                 ) : (
-                  <p>ログインすると、今日の1曲を投稿してタイムラインを楽しめます。</p>
+                  <span>Sign in with Spotify</span>
                 )}
-              </div>
+              </button>
+
+              <p className="mt-6 text-center text-xs leading-relaxed text-zinc-500">
+                ログインすると、今日の1曲を投稿してタイムラインを楽しめます。
+              </p>
             </div>
           </div>
         </motion.div>
@@ -253,4 +92,3 @@ export default function Login() {
     </div>
   );
 }
-

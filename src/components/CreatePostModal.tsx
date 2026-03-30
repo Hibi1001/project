@@ -7,7 +7,6 @@ import {
   fetchTodaysPostCountForUser,
 } from '../lib/api';
 import { DAILY_POST_LIMIT } from '../constants/posting';
-import { getOAuthRedirectTo, supabase } from '../lib/supabase';
 import { POST_CAPTION_MAX_LENGTH } from '../types';
 
 interface CreatePostModalProps {
@@ -202,30 +201,12 @@ export default function CreatePostModal({
                   </div>
                 ) : null}
 
-                {!spotifyAccessToken && (
-                  <>
-                    <p className="text-sm text-zinc-400 mb-3">
-                      Spotify と連携して最近再生した曲から選択できます。
-                    </p>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        // Triggers Spotify OAuth; Supabase will handle redirect and session update.
-                        await supabase.auth.signInWithOAuth({
-                          provider: 'spotify',
-                          options: {
-                            scopes: 'user-read-recently-played',
-                            redirectTo: getOAuthRedirectTo(),
-                          },
-                        });
-                      }}
-                      className="w-full bg-emerald-500 text-white font-semibold py-2.5 px-4 rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition-all text-sm"
-                      disabled={isSubmitting}
-                    >
-                      Connect with Spotify
-                    </button>
-                  </>
-                )}
+                {!spotifyAccessToken && !shareSongBlocked ? (
+                  <p className="mb-3 text-sm leading-relaxed text-zinc-400">
+                    Spotify の連携トークンを取得できません。ログイン画面から「Sign in
+                    with Spotify」で再度お試しください（最近再生した曲の一覧に必要です）。
+                  </p>
+                ) : null}
 
                 {error && (
                   <p className="mt-3 text-sm text-red-400 bg-red-400/10 rounded-lg px-3 py-2">

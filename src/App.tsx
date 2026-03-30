@@ -167,6 +167,7 @@ function App() {
 
   const userId = session?.user?.id ?? null;
 
+  /** One-time setup: `public.users.display_name` must be set (not a separate `profiles` table in this app). */
   useEffect(() => {
     if (!userId) {
       setProfileGate('unknown');
