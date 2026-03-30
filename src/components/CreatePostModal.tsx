@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Music2 } from 'lucide-react';
+import { X, Music2, Search } from 'lucide-react';
 import {
   createPost,
-  fetchItunesPreviewForSpotifyTrack,
   fetchTodaysPostCountForUser,
+  searchItunesTracksForPosting,
+  type ItunesShareTrack,
 } from '../lib/api';
 import { DAILY_POST_LIMIT } from '../constants/posting';
 import { POST_CAPTION_MAX_LENGTH } from '../types';
@@ -14,7 +15,6 @@ interface CreatePostModalProps {
   onClose: () => void;
   onSubmitSuccess: () => void;
   userId: string;
-  spotifyAccessToken: string | null;
   shareSongBlocked: boolean;
   /** Shown when `shareSongBlocked` (daily cap reached). */
   shareLimitMessage: string;
@@ -25,80 +25,52 @@ export default function CreatePostModal({
   onClose,
   onSubmitSuccess,
   userId,
-  spotifyAccessToken,
   shareSongBlocked,
   shareLimitMessage,
 }: CreatePostModalProps) {
-  const [tracks, setTracks] = useState<
-    { id: string; name: string; artist: string; albumArt: string; previewUrl: string | null }[]
-  >([]);
+  const [tracks, setTracks] = useState<ItunesShareTrack[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
+  const [searchAttempted, setSearchAttempted] = useState(false);
+
+  const runSearch = useCallback(async () => {
+    if (!isOpen || shareSongBlocked) return;
+    const q = searchQuery.trim();
+    if (!q) {
+      setTracks([]);
+      return;
+    }
+    setIsLoading(true);
+    setSearchAttempted(true);
+    setError(null);
+    try {
+      const list = await searchItunesTracksForPosting(q);
+      setTracks(list);
+      if (list.length === 0) {
+        setError('曲が見つかりませんでした。別のキーワードで試してください。');
+      }
+    } catch {
+      setError('検索に失敗しました。もう一度お試しください。');
+      setTracks([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isOpen, searchQuery, shareSongBlocked]);
 
   useEffect(() => {
-    const fetchRecentlyPlayed = async () => {
-      if (!isOpen || !spotifyAccessToken) {
-        setTracks([]);
-        return;
-      }
-      setIsLoading(true);
+    if (!isOpen) {
+      setTracks([]);
+      setSearchQuery('');
       setError(null);
-      try {
-        const res = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=20', {
-          headers: {
-            Authorization: `Bearer ${spotifyAccessToken}`,
-          },
-        });
-        if (!res.ok) {
-          setError('Failed to fetch recently played tracks from Spotify.');
-          setTracks([]);
-          setIsLoading(false);
-          return;
-        }
-        const json = await res.json();
-        const items = Array.isArray(json.items) ? json.items : [];
-        const mapped = items
-          .map((item: any) => {
-            const track = item?.track;
-            if (!track) return null;
-            const name = track.name as string | undefined;
-            const artist = (track.artists?.[0]?.name as string | undefined) ?? '';
-            const albumArt =
-              (track.album?.images?.[0]?.url as string | undefined) ??
-              'https://placehold.co/64x64?text=No+Art';
-            const previewUrl = (track.preview_url as string | null) ?? null;
-            const id = track.id as string | undefined;
-            if (!id || !name || !artist) return null;
-            return { id, name, artist, albumArt, previewUrl };
-          })
-          .filter(Boolean) as {
-          id: string;
-          name: string;
-          artist: string;
-          albumArt: string;
-          previewUrl: string | null;
-        }[];
-        setTracks(mapped);
-      } catch {
-        setError('Failed to fetch recently played tracks from Spotify.');
-        setTracks([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      setCaption('');
+      setSearchAttempted(false);
+    }
+  }, [isOpen]);
 
-    void fetchRecentlyPlayed();
-  }, [isOpen, spotifyAccessToken]);
-
-  const handleSelectTrack = async (track: {
-    id: string;
-    name: string;
-    artist: string;
-    albumArt: string;
-    previewUrl: string | null;
-  }) => {
+  const handleSelectTrack = async (track: ItunesShareTrack) => {
     if (isSubmitting) return;
     setError(null);
     setIsSubmitting(true);
@@ -112,15 +84,7 @@ export default function CreatePostModal({
         return;
       }
 
-      // Spotify Web API often omits preview_url now — fill from iTunes silently when missing.
-      let previewUrl =
-        track.previewUrl?.trim() ? track.previewUrl.trim() : null;
-      if (!previewUrl) {
-        previewUrl = await fetchItunesPreviewForSpotifyTrack(
-          track.name,
-          track.artist,
-        );
-      }
+      const previewUrl = track.previewUrl?.trim() || null;
 
       await createPost({
         userId,
@@ -132,6 +96,7 @@ export default function CreatePostModal({
         caption: caption.trim() || null,
       });
       setTracks([]);
+      setSearchQuery('');
       setCaption('');
       onClose();
       onSubmitSuccess();
@@ -146,6 +111,7 @@ export default function CreatePostModal({
     if (!isSubmitting) {
       setError(null);
       setTracks([]);
+      setSearchQuery('');
       setCaption('');
       onClose();
     }
@@ -160,7 +126,7 @@ export default function CreatePostModal({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={handleClose}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
             aria-hidden
           />
           <motion.div
@@ -168,10 +134,10 @@ export default function CreatePostModal({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ type: 'spring', duration: 0.3 }}
-            className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4"
+            className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-20"
           >
-            <div className="w-full max-w-md max-h-[85vh] bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-800 overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+            <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+              <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-6 py-4">
                 <h2 className="text-lg font-semibold text-zinc-50">
                   曲をシェア（1日{DAILY_POST_LIMIT}回まで）
                 </h2>
@@ -179,43 +145,78 @@ export default function CreatePostModal({
                   type="button"
                   onClick={handleClose}
                   disabled={isSubmitting}
-                  className="p-2 rounded-full text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                  className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-50 disabled:opacity-50"
                   aria-label="閉じる"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="p-4 flex flex-col min-h-0">
+              <div className="flex min-h-0 flex-1 flex-col p-4">
                 {shareSongBlocked && shareLimitMessage ? (
-                  <div className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 shrink-0">
-                    <p className="text-xs font-semibold text-amber-200/95 mb-1">
+                  <div className="mb-4 shrink-0 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3">
+                    <p className="mb-1 text-xs font-semibold text-amber-200/95">
                       Today&apos;s limit: {DAILY_POST_LIMIT} songs
                     </p>
-                    <p className="text-sm text-amber-100/90 leading-snug">
+                    <p className="text-sm leading-snug text-amber-100/90">
                       本日のシェアは{DAILY_POST_LIMIT}回までです。
                     </p>
-                    <p className="text-sm text-amber-300 font-medium mt-2 leading-snug">
+                    <p className="mt-2 text-sm font-medium leading-snug text-amber-300">
                       {shareLimitMessage}
                     </p>
                   </div>
                 ) : null}
 
-                {!spotifyAccessToken && !shareSongBlocked ? (
-                  <p className="mb-3 text-sm leading-relaxed text-zinc-400">
-                    Spotify の連携トークンを取得できません。ログイン画面から「Sign in
-                    with Spotify」で再度お試しください（最近再生した曲の一覧に必要です）。
+                {!shareSongBlocked ? (
+                  <div className="mb-3 shrink-0 space-y-2">
+                    <label
+                      htmlFor="track-search"
+                      className="block text-xs font-medium text-zinc-400"
+                    >
+                      曲名・アーティストで検索（iTunes）
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="track-search"
+                        type="search"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void runSearch();
+                          }
+                        }}
+                        placeholder="例: Official髭男dism Pretender"
+                        disabled={isSubmitting || isLoading}
+                        className="min-w-0 flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void runSearch()}
+                        disabled={
+                          isSubmitting || isLoading || !searchQuery.trim()
+                        }
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Search className="h-4 w-4" />
+                        検索
+                      </button>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-zinc-500">
+                      プレビューがない曲は、投稿後もタイムラインで再生されない場合があります。
+                    </p>
+                  </div>
+                ) : null}
+
+                {error ? (
+                  <p className="mt-2 rounded-lg bg-red-400/10 px-3 py-2 text-sm text-red-400">
+                    {error}
                   </p>
                 ) : null}
 
-                {error && (
-                  <p className="mt-3 text-sm text-red-400 bg-red-400/10 rounded-lg px-3 py-2">
-                    {error}
-                  </p>
-                )}
-
-                {spotifyAccessToken && (
-                  <div className="mt-3 flex-1 min-h-0 flex flex-col">
+                {!shareSongBlocked ? (
+                  <div className="mt-3 flex min-h-0 flex-1 flex-col">
                     <div className="mb-3 shrink-0 rounded-xl border border-zinc-700/80 bg-zinc-800/40 px-3 py-2">
                       <label
                         htmlFor="post-caption"
@@ -240,16 +241,20 @@ export default function CreatePostModal({
                         {caption.length}/{POST_CAPTION_MAX_LENGTH}
                       </p>
                     </div>
-                    {isLoading && (
-                      <p className="text-sm text-zinc-500 py-4">Spotify から取得中...</p>
-                    )}
-                    {!isLoading && tracks.length === 0 && (
-                      <p className="text-sm text-zinc-500 py-4">
-                        最近再生した曲が見つかりませんでした。
+
+                    {isLoading ? (
+                      <p className="py-4 text-sm text-zinc-500">検索中…</p>
+                    ) : null}
+                    {!isLoading &&
+                    !searchAttempted &&
+                    !searchQuery.trim() ? (
+                      <p className="py-4 text-sm text-zinc-500">
+                        キーワードを入力して「検索」を押してください。
                       </p>
-                    )}
-                    {!isLoading && tracks.length > 0 && (
-                      <ul className="overflow-y-auto space-y-1 pr-1 -mr-1">
+                    ) : null}
+
+                    {!isLoading && tracks.length > 0 ? (
+                      <ul className="-mr-1 space-y-1 overflow-y-auto pr-1">
                         <AnimatePresence mode="popLayout">
                           {tracks.map((track) => (
                             <motion.li
@@ -261,32 +266,37 @@ export default function CreatePostModal({
                             >
                               <button
                                 type="button"
-                                onClick={() => handleSelectTrack(track)}
+                                onClick={() => void handleSelectTrack(track)}
                                 disabled={isSubmitting || shareSongBlocked}
-                                className="w-full flex items-center gap-3 p-3 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 border border-transparent hover:border-zinc-700 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex w-full items-center gap-3 rounded-xl border border-transparent bg-zinc-800/50 p-3 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <img
                                   src={track.albumArt}
                                   alt=""
-                                  className="w-12 h-12 rounded-lg shrink-0 object-cover"
+                                  className="h-12 w-12 shrink-0 rounded-lg object-cover"
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-zinc-50 font-medium truncate">
+                                  <p className="truncate font-medium text-zinc-50">
                                     {track.name}
                                   </p>
-                                  <p className="text-zinc-400 text-sm truncate">
+                                  <p className="truncate text-sm text-zinc-400">
                                     {track.artist}
                                   </p>
+                                  {!track.previewUrl ? (
+                                    <p className="mt-0.5 text-[10px] text-amber-500/90">
+                                      プレビューなし
+                                    </p>
+                                  ) : null}
                                 </div>
-                                <Music2 className="w-5 h-5 text-zinc-500 shrink-0" />
+                                <Music2 className="h-5 w-5 shrink-0 text-zinc-500" />
                               </button>
                             </motion.li>
                           ))}
                         </AnimatePresence>
                       </ul>
-                    )}
+                    ) : null}
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
           </motion.div>

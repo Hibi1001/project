@@ -583,7 +583,7 @@ export interface CreatePostParams {
   artistName: string;
   previewUrl: string | null;
   coverUrl: string;
-  /** Spotify Web API track id for open.spotify.com deep links. */
+  /** Store track id (iTunes `trackId` or legacy Spotify id); persisted as `spotify_track_id`. */
   spotifyTrackId?: string | null;
   /** ひとこと — max {@link POST_CAPTION_MAX_LENGTH} chars. */
   caption?: string | null;
@@ -781,42 +781,69 @@ export interface iTunesSongResult {
   artworkUrl100: string;
 }
 
-export async function searchiTunesSongs(query: string): Promise<iTunesSongResult[]> {
-  if (!query.trim()) return [];
-  const encoded = encodeURIComponent(query.trim());
+function upgradeItunesArtworkUrl(url: string | undefined): string {
+  if (!url?.trim()) return 'https://placehold.co/64x64?text=No+Art';
+  return url.replace(/100x100bb/g, '600x600bb');
+}
+
+/** Tracks for the share modal — iTunes Search API (free); previews optional. */
+export type ItunesShareTrack = {
+  id: string;
+  name: string;
+  artist: string;
+  albumArt: string;
+  previewUrl: string | null;
+};
+
+export async function searchItunesTracksForPosting(
+  query: string,
+): Promise<ItunesShareTrack[]> {
+  const q = query.trim();
+  if (!q) return [];
+
   const res = await fetch(
-    `https://itunes.apple.com/search?term=${encoded}&entity=song&limit=10&country=jp`
+    `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=20&country=jp`,
   );
   if (!res.ok) return [];
-  const json = (await res.json()) as { results?: Array<{ trackName?: string; artistName?: string; previewUrl?: string; artworkUrl100?: string }> };
+
+  const json = (await res.json()) as {
+    results?: Array<{
+      trackId?: number;
+      trackName?: string;
+      artistName?: string;
+      artworkUrl100?: string;
+      previewUrl?: string;
+    }>;
+  };
+
   const results = json.results ?? [];
   return results
-    .filter((r) => r.previewUrl && r.trackName && r.artistName && r.artworkUrl100)
+    .filter(
+      (r) =>
+        r.trackId != null &&
+        Boolean(r.trackName?.trim()) &&
+        Boolean(r.artistName?.trim()),
+    )
     .map((r) => ({
-      trackName: r.trackName!,
-      artistName: r.artistName!,
-      previewUrl: r.previewUrl!,
-      artworkUrl100: r.artworkUrl100!,
+      id: String(r.trackId!),
+      name: r.trackName!.trim(),
+      artist: r.artistName!.trim(),
+      albumArt: upgradeItunesArtworkUrl(r.artworkUrl100),
+      previewUrl: r.previewUrl?.trim() || null,
     }));
 }
 
-/**
- * When Spotify no longer returns `preview_url`, look up a 30s preview on iTunes
- * using the same track/artist labels (Spotify metadata stays authoritative for the post).
- * Fails silently — returns null if no match or on network error.
- */
-export async function fetchItunesPreviewForSpotifyTrack(
-  trackName: string,
-  artistName: string,
-): Promise<string | null> {
-  const q = `${trackName} ${artistName}`.trim();
-  if (!q) return null;
-  try {
-    const hits = await searchiTunesSongs(q);
-    const first = hits[0];
-    return first?.previewUrl?.trim() ? first.previewUrl : null;
-  } catch {
-    return null;
-  }
+export async function searchiTunesSongs(query: string): Promise<iTunesSongResult[]> {
+  if (!query.trim()) return [];
+  const rows = await searchItunesTracksForPosting(query);
+  return rows
+    .filter((r) => r.previewUrl)
+    .slice(0, 10)
+    .map((r) => ({
+      trackName: r.name,
+      artistName: r.artist,
+      previewUrl: r.previewUrl,
+      artworkUrl100: r.albumArt,
+    }));
 }
 

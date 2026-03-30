@@ -90,10 +90,20 @@ function amazonMusicSearchUrl(post: Post): string {
   return `https://music.amazon.co.jp/search/${encodeURIComponent(postStreamingSearchTerm(post))}`;
 }
 
-function openSpotifyTrackUrl(post: Post): string | null {
+/** `spotify_track_id` holds iTunes `trackId` (digits) or legacy Spotify track id. */
+function storeTrackDeepLink(post: Post): { href: string; label: string } | null {
   const id = post.spotifyTrackId?.trim();
   if (!id) return null;
-  return `https://open.spotify.com/track/${id}`;
+  if (/^\d+$/.test(id)) {
+    return {
+      href: `https://music.apple.com/jp/song?i=${id}`,
+      label: 'Apple Music',
+    };
+  }
+  return {
+    href: `https://open.spotify.com/track/${id}`,
+    label: 'Spotify',
+  };
 }
 
 export default function Timeline({
@@ -1175,7 +1185,7 @@ export default function Timeline({
           const profileSlug = postUser?.displayId?.trim()
             ? postUser.displayId
             : post.userId;
-          const spotifyOpenUrl = openSpotifyTrackUrl(post);
+          const trackStoreLink = storeTrackDeepLink(post);
           const songPosition =
             feedItems.findIndex(
               (x) => x.itemType === 'song' && x.post.id === post.id,
@@ -1287,14 +1297,14 @@ export default function Timeline({
                     >
                       Amazon Music
                     </a>
-                    {spotifyOpenUrl ? (
+                    {trackStoreLink ? (
                       <a
-                        href={spotifyOpenUrl}
+                        href={trackStoreLink.href}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-zinc-400 transition-colors hover:text-white"
                       >
-                        Spotify
+                        {trackStoreLink.label}
                       </a>
                     ) : null}
                   </div>

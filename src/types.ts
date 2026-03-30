@@ -27,7 +27,7 @@ export interface Post {
   /** Number of rows in `post_replies` for this post. */
   replyCount: number;
   previewUrl?: string;
-  /** When set (new shares), deep link to track in Spotify app/web. */
+  /** Store track id (iTunes `trackId` string or legacy Spotify id); column `spotify_track_id`. */
   spotifyTrackId?: string | null;
   reactions: {
     vocal: number;
@@ -65,6 +65,7 @@ export interface DbPost {
   cover_url?: string | null;
   caption?: string | null;
   created_at: string;
+  /** iTunes track id (stringified) or legacy Spotify id; column name retained. */
   spotify_track_id?: string | null;
 }
 
