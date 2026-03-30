@@ -983,7 +983,7 @@ export default function Timeline({
                 data-timeline-post
                 data-item-type="band"
                 data-band-id={item.id}
-                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-40 pt-10"
+                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-40 pt-16"
                 style={{ scrollSnapAlign: 'start' }}
                 aria-label="バンド募集"
               >
