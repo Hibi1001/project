@@ -554,11 +554,16 @@ export default function Profile({
                 {(user.name || '?').slice(0, 1).toUpperCase()}
               </div>
             )}
-            <div>
-              <h2 className="text-2xl font-bold text-zinc-50 mb-2">
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-zinc-50">
                 {user.name}
               </h2>
-              <p className="text-zinc-400 text-sm">
+              {user.recruitment?.trim() ? (
+                <p className="whitespace-pre-wrap text-sm text-zinc-300">
+                  {user.recruitment.trim()}
+                </p>
+              ) : null}
+              <p className="text-sm text-zinc-400">
                 {userPosts.length}曲シェア済み
               </p>
             </div>
@@ -916,12 +921,13 @@ export default function Profile({
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-2">
-                      現在募集中のバンド・パート
+                      自己紹介
                     </label>
                     <textarea
                       value={recruitmentStatus}
                       onChange={(e) => setRecruitmentStatus(e.target.value)}
                       rows={4}
+                      placeholder="例：ベース弾けます！普段はロックやR&Bをよく聴きます。"
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow resize-none"
                       disabled={isSaving}
                     />

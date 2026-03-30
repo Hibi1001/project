@@ -136,7 +136,7 @@ export default function InitialProfileSetup({ userId, onComplete }: Props) {
               htmlFor="initial-bio"
               className="mb-1 block text-xs font-medium text-zinc-400"
             >
-              ひとこと（任意）
+              自己紹介（任意）
             </label>
             <textarea
               id="initial-bio"
@@ -146,7 +146,7 @@ export default function InitialProfileSetup({ userId, onComplete }: Props) {
               maxLength={500}
               disabled={submitting}
               className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-              placeholder="活動や募集のメモなど"
+              placeholder="例：ベース弾けます！普段はロックやR&Bをよく聴きます。"
             />
           </div>
           <div>
