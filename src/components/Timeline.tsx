@@ -1048,7 +1048,7 @@ export default function Timeline({
           </div>
         </div>
 
-        {feedItems.map((item) => {
+        {feedItems.map((item, feedIndex) => {
           if (item.itemType === 'band') {
             const ownerKey = item.userId || item.owner_id;
             const owner = ownerKey ? usersById[ownerKey] : undefined;
@@ -1244,6 +1244,10 @@ export default function Timeline({
             feedItems.findIndex(
               (x) => x.itemType === 'song' && x.post.id === post.id,
             ) + 1;
+          const songOrdinal = feedItems
+            .slice(0, feedIndex)
+            .filter((i) => i.itemType === 'song').length;
+          const isFirstSongSlide = songOrdinal === 0;
 
           return (
             <section
@@ -1251,7 +1255,7 @@ export default function Timeline({
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-48 pt-10"
+              className={`relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-48 ${isFirstSongSlide ? 'pt-16' : 'pt-10'}`}
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -1274,7 +1278,9 @@ export default function Timeline({
                 }}
               />
 
-              <div className="relative z-10 mx-auto -mt-3 flex min-h-0 w-full max-w-md flex-col items-center gap-2 sm:gap-3 sm:-mt-4 pb-24">
+              <div
+                className={`relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-col items-center gap-2 sm:gap-3 pb-24 ${isFirstSongSlide ? '' : '-mt-3 sm:-mt-4'}`}
+              >
                 <div className="relative mx-auto w-72 shrink-0 sm:w-80">
                   {post.previewUrl ? (
                     <button
