@@ -201,6 +201,7 @@ function mapDbUserToUser(user: DbUser): User {
     displayId: user.display_id ?? null,
     name: user.display_name,
     avatar: user.avatar_url ?? '',
+    grade: user.grade ?? null,
     instruments: user.played_instruments ?? [],
     genres: user.favorite_genres ?? [],
     topBands: user.top_3_bands ?? [],

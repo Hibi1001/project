@@ -103,10 +103,15 @@ export default function Profile({
   const croppedAreaPixelsRef = useRef<Area | null>(null);
 
   const [displayName, setDisplayName] = useState('');
-  const [playedInstruments, setPlayedInstruments] = useState('');
-  const [favoriteGenres, setFavoriteGenres] = useState('');
-  const [top3Bands, setTop3Bands] = useState('');
-  const [myGear, setMyGear] = useState('');
+  const [grade, setGrade] = useState('');
+  const [partTags, setPartTags] = useState<string[]>([]);
+  const [partInput, setPartInput] = useState('');
+  const [genreTags, setGenreTags] = useState<string[]>([]);
+  const [genreInput, setGenreInput] = useState('');
+  const [bandTags, setBandTags] = useState<string[]>([]);
+  const [bandInput, setBandInput] = useState('');
+  const [equipmentTags, setEquipmentTags] = useState<string[]>([]);
+  const [equipmentInput, setEquipmentInput] = useState('');
   const [recruitmentStatus, setRecruitmentStatus] = useState('');
   const [instagramUrl, setInstagramUrl] = useState('');
   const [lineUrl, setLineUrl] = useState('');
@@ -271,10 +276,21 @@ export default function Profile({
     setSaveError(null);
     setAvatarUploadError(null);
     setDisplayName(user.name ?? '');
-    setPlayedInstruments((user.instruments ?? []).join(', '));
-    setFavoriteGenres((user.genres ?? []).join(', '));
-    setTop3Bands((user.topBands ?? []).join(', '));
-    setMyGear((user.gear ?? []).join(', '));
+    setGrade(user.grade ?? '');
+    setPartTags(
+      (user.instruments ?? []).map((i) => String(i).trim()).filter(Boolean),
+    );
+    setPartInput('');
+    setGenreTags((user.genres ?? []).map((g) => String(g).trim()).filter(Boolean));
+    setGenreInput('');
+    setBandTags(
+      (user.topBands ?? []).map((b) => String(b).trim()).filter(Boolean),
+    );
+    setBandInput('');
+    setEquipmentTags(
+      (user.gear ?? []).map((g) => String(g).trim()).filter(Boolean),
+    );
+    setEquipmentInput('');
     setRecruitmentStatus(user.recruitment ?? '');
     setInstagramUrl(persistedSnsRef.current.instagram);
     setLineUrl(persistedSnsRef.current.line);
@@ -431,10 +447,11 @@ export default function Profile({
       .update({
         display_id: displayIdForDb,
         display_name: displayName.trim(),
-        played_instruments: toStringArray(playedInstruments),
-        favorite_genres: toStringArray(favoriteGenres),
-        top_3_bands: toStringArray(top3Bands).slice(0, 3),
-        my_gear: toStringArray(myGear),
+        grade: grade.trim() || null,
+        played_instruments: toStringArray(partTags.join(',')),
+        favorite_genres: toStringArray(genreTags.join(',')),
+        top_3_bands: toStringArray(bandTags.join(',')).slice(0, 3),
+        my_gear: toStringArray(equipmentTags.join(',')),
         recruitment_status: recruitmentStatus.trim(),
         instagram_url: instagramUrl.trim() || null,
         line_url: lineUrl.trim() || null,
@@ -555,9 +572,14 @@ export default function Profile({
               </div>
             )}
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-zinc-50">
-                {user.name}
-              </h2>
+                <h2 className="text-2xl font-bold text-zinc-50 flex flex-wrap items-baseline gap-2">
+                  <span>{user.name}</span>
+                  {user.grade ? (
+                    <span className="text-sm font-semibold text-emerald-400/90">
+                      ({user.grade})
+                    </span>
+                  ) : null}
+                </h2>
               {user.recruitment?.trim() ? (
                 <p className="whitespace-pre-wrap text-sm text-zinc-300">
                   {user.recruitment.trim()}
@@ -829,6 +851,30 @@ export default function Profile({
                     />
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-400 mb-1">
+                      学年
+                    </label>
+                    <p className="text-xs text-zinc-500 mb-2">
+                      サークル内での学年を選択してください（任意）
+                    </p>
+                    <select
+                      value={grade}
+                      onChange={(e) => setGrade(e.target.value)}
+                      className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm text-zinc-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:opacity-60"
+                      disabled={isSaving}
+                    >
+                      <option value="">未設定</option>
+                      <option value="B1">学部1年 (B1)</option>
+                      <option value="B2">学部2年 (B2)</option>
+                      <option value="B3">学部3年 (B3)</option>
+                      <option value="B4">学部4年 (B4)</option>
+                      <option value="M1">修士1年 (M1)</option>
+                      <option value="M2">修士2年 (M2)</option>
+                      <option value="OB/OG">OB/OG</option>
+                    </select>
+                  </div>
+
                   {isOwnProfile && (
                     <div>
                       <label className="block text-sm font-medium text-zinc-400 mb-1">
@@ -860,15 +906,93 @@ export default function Profile({
                       担当パート (英語表記)
                     </label>
                     <p className="text-xs text-zinc-500 mb-2">
-                      ※複数の場合はカンマ（,）で区切って入力してください
+                      ※カンマ（, / 、）またはEnterで追加できます
                     </p>
-                    <input
-                      value={playedInstruments}
-                      onChange={(e) => setPlayedInstruments(e.target.value)}
-                      placeholder="例: Guitar, Vocal"
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-                      disabled={isSaving}
-                    />
+                    <div
+                      className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-zinc-50 focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-transparent transition-shadow"
+                      onClick={() => {
+                        const el = document.getElementById(
+                          'part-tags-input',
+                        ) as HTMLInputElement | null;
+                        el?.focus();
+                      }}
+                      role="group"
+                      aria-label="担当パート"
+                    >
+                      {partTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-sm text-zinc-200"
+                        >
+                          <span className="max-w-[14rem] truncate">{tag}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPartTags((prev) => prev.filter((t) => t !== tag));
+                            }}
+                            disabled={isSaving}
+                            className="ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+                            aria-label={`${tag} を削除`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+
+                      <input
+                        id="part-tags-input"
+                        type="text"
+                        value={partInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v.includes(',') || v.includes('、')) {
+                            const parts = v.split(/[、,]/);
+                            const head = parts.slice(0, -1);
+                            const tail = parts[parts.length - 1] ?? '';
+                            const next = head
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            if (next.length) {
+                              setPartTags((prev) => {
+                                const set = new Set(prev);
+                                for (const n of next) set.add(n);
+                                return Array.from(set);
+                              });
+                            }
+                            setPartInput(tail);
+                            return;
+                          }
+                          setPartInput(v);
+                        }}
+                        onKeyDown={(e) => {
+                          const key = e.key;
+                          const isDelimiter = key === ',' || key === '、';
+                          if (key === 'Enter' || isDelimiter) {
+                            e.preventDefault();
+                            const raw = partInput.trim();
+                            if (!raw) {
+                              setPartInput('');
+                              return;
+                            }
+                            setPartTags((prev) => {
+                              const set = new Set(prev);
+                              set.add(raw);
+                              return Array.from(set);
+                            });
+                            setPartInput('');
+                            return;
+                          }
+                          if (key === 'Backspace' && !partInput) {
+                            setPartTags((prev) => prev.slice(0, -1));
+                          }
+                        }}
+                        placeholder={partTags.length ? '' : '例: Guitar, Vocal'}
+                        disabled={isSaving}
+                        className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-zinc-50 placeholder-zinc-500 focus:outline-none disabled:opacity-50"
+                        autoComplete="off"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -876,15 +1000,94 @@ export default function Profile({
                       好きなジャンル
                     </label>
                     <p className="text-xs text-zinc-500 mb-2">
-                      ※複数の場合はカンマ（,）で区切って入力してください
+                      ※カンマ（, / 、）またはEnterで追加できます
                     </p>
-                    <input
-                      value={favoriteGenres}
-                      onChange={(e) => setFavoriteGenres(e.target.value)}
-                      placeholder="例: Rock, J-Pop"
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-                      disabled={isSaving}
-                    />
+                    <div
+                      className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-zinc-50 focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-transparent transition-shadow"
+                      onClick={() => {
+                        const el = document.getElementById(
+                          'favorite-genres-input',
+                        ) as HTMLInputElement | null;
+                        el?.focus();
+                      }}
+                      role="group"
+                      aria-label="好きなジャンル"
+                    >
+                      {genreTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-sm text-zinc-200"
+                        >
+                          <span className="max-w-[14rem] truncate">{tag}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGenreTags((prev) => prev.filter((t) => t !== tag));
+                            }}
+                            disabled={isSaving}
+                            className="ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+                            aria-label={`${tag} を削除`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+
+                      <input
+                        id="favorite-genres-input"
+                        type="text"
+                        value={genreInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          // Allow pasting multiple tags at once.
+                          if (v.includes(',') || v.includes('、')) {
+                            const parts = v.split(/[、,]/);
+                            const head = parts.slice(0, -1);
+                            const tail = parts[parts.length - 1] ?? '';
+                            const next = head
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            if (next.length) {
+                              setGenreTags((prev) => {
+                                const set = new Set(prev);
+                                for (const n of next) set.add(n);
+                                return Array.from(set);
+                              });
+                            }
+                            setGenreInput(tail);
+                            return;
+                          }
+                          setGenreInput(v);
+                        }}
+                        onKeyDown={(e) => {
+                          const key = e.key;
+                          const isDelimiter = key === ',' || key === '、';
+                          if (key === 'Enter' || isDelimiter) {
+                            e.preventDefault();
+                            const raw = genreInput.trim();
+                            if (!raw) {
+                              setGenreInput('');
+                              return;
+                            }
+                            setGenreTags((prev) => {
+                              const set = new Set(prev);
+                              set.add(raw);
+                              return Array.from(set);
+                            });
+                            setGenreInput('');
+                            return;
+                          }
+                          if (key === 'Backspace' && !genreInput) {
+                            setGenreTags((prev) => prev.slice(0, -1));
+                          }
+                        }}
+                        placeholder={genreTags.length ? '' : '例: Rock, J-Pop'}
+                        disabled={isSaving}
+                        className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-zinc-50 placeholder-zinc-500 focus:outline-none disabled:opacity-50"
+                        autoComplete="off"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -892,15 +1095,95 @@ export default function Profile({
                       好きなバンド Top 3
                     </label>
                     <p className="text-xs text-zinc-500 mb-2">
-                      ※複数の場合はカンマ（,）で区切って入力してください
+                      ※カンマ（, / 、）またはEnterで追加できます
                     </p>
-                    <input
-                      value={top3Bands}
-                      onChange={(e) => setTop3Bands(e.target.value)}
-                      placeholder="例: Arctic Monkeys, Oasis, Blur"
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-                      disabled={isSaving}
-                    />
+                    <div
+                      className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-zinc-50 focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-transparent transition-shadow"
+                      onClick={() => {
+                        const el = document.getElementById(
+                          'band-tags-input',
+                        ) as HTMLInputElement | null;
+                        el?.focus();
+                      }}
+                      role="group"
+                      aria-label="好きなバンド"
+                    >
+                      {bandTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-sm text-zinc-200"
+                        >
+                          <span className="max-w-[14rem] truncate">{tag}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBandTags((prev) => prev.filter((t) => t !== tag));
+                            }}
+                            disabled={isSaving}
+                            className="ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+                            aria-label={`${tag} を削除`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+
+                      <input
+                        id="band-tags-input"
+                        type="text"
+                        value={bandInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v.includes(',') || v.includes('、')) {
+                            const parts = v.split(/[、,]/);
+                            const head = parts.slice(0, -1);
+                            const tail = parts[parts.length - 1] ?? '';
+                            const next = head
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            if (next.length) {
+                              setBandTags((prev) => {
+                                const set = new Set(prev);
+                                for (const n of next) set.add(n);
+                                return Array.from(set);
+                              });
+                            }
+                            setBandInput(tail);
+                            return;
+                          }
+                          setBandInput(v);
+                        }}
+                        onKeyDown={(e) => {
+                          const key = e.key;
+                          const isDelimiter = key === ',' || key === '、';
+                          if (key === 'Enter' || isDelimiter) {
+                            e.preventDefault();
+                            const raw = bandInput.trim();
+                            if (!raw) {
+                              setBandInput('');
+                              return;
+                            }
+                            setBandTags((prev) => {
+                              const set = new Set(prev);
+                              set.add(raw);
+                              return Array.from(set);
+                            });
+                            setBandInput('');
+                            return;
+                          }
+                          if (key === 'Backspace' && !bandInput) {
+                            setBandTags((prev) => prev.slice(0, -1));
+                          }
+                        }}
+                        placeholder={
+                          bandTags.length ? '' : '例: Arctic Monkeys, Oasis, Blur'
+                        }
+                        disabled={isSaving}
+                        className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-zinc-50 placeholder-zinc-500 focus:outline-none disabled:opacity-50"
+                        autoComplete="off"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -908,15 +1191,97 @@ export default function Profile({
                       使用機材
                     </label>
                     <p className="text-xs text-zinc-500 mb-2">
-                      ※複数の場合はカンマ（,）で区切って入力してください
+                      ※カンマ（, / 、）またはEnterで追加できます
                     </p>
-                    <input
-                      value={myGear}
-                      onChange={(e) => setMyGear(e.target.value)}
-                      placeholder="例: Stratocaster, Marshall Amp"
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-50 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-                      disabled={isSaving}
-                    />
+                    <div
+                      className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-zinc-50 focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-transparent transition-shadow"
+                      onClick={() => {
+                        const el = document.getElementById(
+                          'equipment-tags-input',
+                        ) as HTMLInputElement | null;
+                        el?.focus();
+                      }}
+                      role="group"
+                      aria-label="使用機材"
+                    >
+                      {equipmentTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/70 px-3 py-1 text-sm text-zinc-200"
+                        >
+                          <span className="max-w-[14rem] truncate">{tag}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEquipmentTags((prev) =>
+                                prev.filter((t) => t !== tag),
+                              );
+                            }}
+                            disabled={isSaving}
+                            className="ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+                            aria-label={`${tag} を削除`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+
+                      <input
+                        id="equipment-tags-input"
+                        type="text"
+                        value={equipmentInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v.includes(',') || v.includes('、')) {
+                            const parts = v.split(/[、,]/);
+                            const head = parts.slice(0, -1);
+                            const tail = parts[parts.length - 1] ?? '';
+                            const next = head
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            if (next.length) {
+                              setEquipmentTags((prev) => {
+                                const set = new Set(prev);
+                                for (const n of next) set.add(n);
+                                return Array.from(set);
+                              });
+                            }
+                            setEquipmentInput(tail);
+                            return;
+                          }
+                          setEquipmentInput(v);
+                        }}
+                        onKeyDown={(e) => {
+                          const key = e.key;
+                          const isDelimiter = key === ',' || key === '、';
+                          if (key === 'Enter' || isDelimiter) {
+                            e.preventDefault();
+                            const raw = equipmentInput.trim();
+                            if (!raw) {
+                              setEquipmentInput('');
+                              return;
+                            }
+                            setEquipmentTags((prev) => {
+                              const set = new Set(prev);
+                              set.add(raw);
+                              return Array.from(set);
+                            });
+                            setEquipmentInput('');
+                            return;
+                          }
+                          if (key === 'Backspace' && !equipmentInput) {
+                            setEquipmentTags((prev) => prev.slice(0, -1));
+                          }
+                        }}
+                        placeholder={
+                          equipmentTags.length ? '' : '例: Stratocaster, Marshall Amp'
+                        }
+                        disabled={isSaving}
+                        className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-zinc-50 placeholder-zinc-500 focus:outline-none disabled:opacity-50"
+                        autoComplete="off"
+                      />
+                    </div>
                   </div>
 
                   <div>

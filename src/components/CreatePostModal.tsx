@@ -42,6 +42,9 @@ export default function CreatePostModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
+  const [selectedTrack, setSelectedTrack] = useState<ItunesShareTrack | null>(
+    null,
+  );
 
   const runSearch = useCallback(async () => {
     if (!isOpen) return;
@@ -141,23 +144,30 @@ export default function CreatePostModal({
       setSearchQuery('');
       setError(null);
       setCaption('');
+      setSelectedTrack(null);
     }
   }, [isOpen]);
 
-  const handleSelectTrack = async (track: ItunesShareTrack) => {
+  const handleSelectTrack = (track: ItunesShareTrack) => {
     if (isSubmitting) return;
+    setError(null);
+    setSelectedTrack(track);
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedTrack || isSubmitting) return;
     setError(null);
     setIsSubmitting(true);
     try {
-      const previewUrl = track.previewUrl?.trim() || null;
+      const previewUrl = selectedTrack.previewUrl?.trim() || null;
 
       await createPost({
         userId,
-        trackName: track.name,
-        artistName: track.artist,
-        spotifyTrackId: track.id,
+        trackName: selectedTrack.name,
+        artistName: selectedTrack.artist,
+        spotifyTrackId: selectedTrack.id,
         previewUrl,
-        coverUrl: track.albumArt,
+        coverUrl: selectedTrack.albumArt,
         caption: caption.trim() || null,
       });
       setSearchTracks([]);
@@ -165,6 +175,7 @@ export default function CreatePostModal({
       setRecommendedHeading(null);
       setSearchQuery('');
       setCaption('');
+      setSelectedTrack(null);
       onClose();
       onSubmitSuccess();
     } catch (err) {
@@ -182,6 +193,7 @@ export default function CreatePostModal({
       setRecommendedHeading(null);
       setSearchQuery('');
       setCaption('');
+      setSelectedTrack(null);
       onClose();
     }
   };
@@ -277,6 +289,47 @@ export default function CreatePostModal({
                 ) : null}
 
                 <div className="mt-3 flex min-h-0 flex-1 flex-col">
+                  {selectedTrack ? (
+                    <div className="mb-3 shrink-0 rounded-xl border border-emerald-500/40 bg-zinc-900/70 px-3 py-3 text-sm text-zinc-100 shadow-md shadow-emerald-500/10">
+                      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-400">
+                        選択中の曲
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={selectedTrack.albumArt}
+                          alt=""
+                          className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-zinc-50">
+                            {selectedTrack.name}
+                          </p>
+                          <p className="truncate text-xs text-zinc-400">
+                            {selectedTrack.artist}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTrack(null)}
+                          disabled={isSubmitting}
+                          className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-60"
+                        >
+                          キャンセル
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSubmit()}
+                          disabled={isSubmitting}
+                          className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-emerald-500/30 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          投稿
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="mb-3 shrink-0 rounded-xl border border-zinc-700/80 bg-zinc-800/40 px-3 py-2">
                     <label
                       htmlFor="post-caption"
@@ -329,7 +382,7 @@ export default function CreatePostModal({
                           >
                             <button
                               type="button"
-                              onClick={() => void handleSelectTrack(track)}
+                              onClick={() => handleSelectTrack(track)}
                               disabled={isSubmitting}
                               className="flex w-full items-center gap-3 rounded-xl border border-transparent bg-zinc-800/50 p-3 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >

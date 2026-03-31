@@ -4,6 +4,8 @@ export interface User {
   displayId: string | null;
   name: string;
   avatar: string;
+   /** 学年（例: 'B1', 'M2', 'OB/OG' など）。未設定時は null。 */
+  grade: string | null;
   instruments: string[];
   genres: string[];
   topBands: string[];
@@ -54,6 +56,7 @@ export interface DbUser {
   top_3_bands: string[] | null;
   my_gear: string[] | null;
   recruitment_status: string | null;
+  grade?: string | null;
 }
 
 export interface DbPost {
