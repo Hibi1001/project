@@ -5,6 +5,8 @@
 /* PWA: edge-to-edge dark shell — no white gaps on rubber-band / safe areas */
 @layer base {
   html {
+    margin: 0;
+    padding: 0;
     overscroll-behavior-y: none;
     position: fixed;
     width: 100%;
@@ -13,6 +15,8 @@
     background-color: #09090b;
   }
   body {
+    margin: 0;
+    padding: 0;
     overscroll-behavior-y: none;
     position: fixed;
     width: 100%;
@@ -22,6 +26,8 @@
     background-color: #09090b;
   }
   #root {
+    margin: 0;
+    padding: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
