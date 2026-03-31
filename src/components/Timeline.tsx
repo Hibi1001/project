@@ -1439,6 +1439,7 @@ export default function Timeline({
 
                   <ReactionButtons
                     postId={post.id}
+                    postOwnerId={post.userId}
                     trackName={post.songTitle}
                     artistName={post.artist}
                     appleMusicUrl={null}
