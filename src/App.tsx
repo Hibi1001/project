@@ -10,9 +10,13 @@ import InitialProfileSetup from './components/InitialProfileSetup';
 import { supabase } from './lib/supabase';
 import {
   fetchHasUnreadNotifications,
+  fetchTimelineBandProjects,
+  fetchTimelinePosts,
   fetchTodaysPostCountForUser,
   isProfileUuid,
 } from './lib/api';
+import { buildMergedTimelineFeed, type FeedItem } from './lib/timelineFeed';
+import LoadingSpinner from './components/LoadingSpinner';
 import { DAILY_POST_LIMIT } from './constants/posting';
 import type { Session } from '@supabase/supabase-js';
 import { RotateCw } from 'lucide-react';
@@ -107,6 +111,11 @@ function App() {
     'unknown' | 'ok' | 'setup'
   >('unknown');
   const [landscapeMobile, setLandscapeMobile] = useState(false);
+  /** Fetched in parallel with profile gate so Timeline does not wait on a second round-trip. */
+  const [timelineFeedBootstrap, setTimelineFeedBootstrap] = useState<{
+    loading: boolean;
+    items: FeedItem[] | null;
+  }>({ loading: false, items: null });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -247,33 +256,59 @@ function App() {
     }
   }, []);
 
-  /** One-time setup: `public.users.display_name` must be set (not a separate `profiles` table in this app). */
+  /**
+   * Profile gate + timeline feed in parallel (no auth → profile → timeline waterfall).
+   * `public.users.display_name` must be set before full app use.
+   */
   useEffect(() => {
     if (!userId) {
       setProfileGate('unknown');
+      setTimelineFeedBootstrap({ loading: false, items: null });
       return;
     }
     let cancelled = false;
     setProfileGate('unknown');
+    setTimelineFeedBootstrap({ loading: true, items: null });
+
     void (async () => {
-      const { data, error } = await supabase
-        .from('users')
-        .select('display_name')
-        .eq('id', userId)
-        .maybeSingle();
-      if (cancelled) return;
-      if (error) {
-        console.error('[profile gate]', error);
-        setProfileGate('setup');
-        return;
+      let mergedItems: FeedItem[] = [];
+      try {
+        const [profileRes, songRows, bandRows] = await Promise.all([
+          supabase
+            .from('users')
+            .select('display_name')
+            .eq('id', userId)
+            .maybeSingle(),
+          fetchTimelinePosts(),
+          fetchTimelineBandProjects(),
+        ]);
+        if (cancelled) return;
+
+        if (profileRes.error) {
+          console.error('[profile gate]', profileRes.error);
+          setProfileGate('setup');
+        } else if (!profileRes.data) {
+          // No `public.users` row yet — InitialProfileSetup will run; still show Timeline.
+          setProfileGate('setup');
+        } else {
+          const dn = (profileRes.data as { display_name?: string | null })
+            .display_name;
+          setProfileGate(dn?.trim() ? 'ok' : 'setup');
+        }
+
+        mergedItems = buildMergedTimelineFeed(songRows, bandRows);
+      } catch (e) {
+        console.error('[bootstrap]', e);
+        if (!cancelled) setProfileGate('setup');
+        mergedItems = [];
+      } finally {
+        // Always leave bootstrap when this request finishes (avoids infinite spinner).
+        if (!cancelled) {
+          setTimelineFeedBootstrap({ loading: false, items: mergedItems });
+        }
       }
-      if (!data) {
-        setProfileGate('setup');
-        return;
-      }
-      const dn = (data as { display_name?: string | null }).display_name;
-      setProfileGate(dn?.trim() ? 'ok' : 'setup');
     })();
+
     return () => {
       cancelled = true;
     };
@@ -356,7 +391,7 @@ function App() {
 
   if (!authReady) {
     return (
-      <div className="min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50" />
+      <LoadingSpinner label="セッションを確認しています…" className="min-h-[100dvh]" />
     );
   }
 
@@ -411,6 +446,8 @@ function App() {
             hasUnreadNotifications={hasUnreadNotifications}
             openReplyForPostId={timelineJumpPostId}
             onConsumedOpenReplyForPostId={handleConsumedTimelineJump}
+            authUserId={userId}
+            feedBootstrap={timelineFeedBootstrap}
           />
         )}
         {currentScreen === 'profile' && selectedProfileSlug && (
@@ -441,7 +478,11 @@ function App() {
 
       {userId && profileGate === 'unknown' ? (
         <div className="fixed inset-0 z-[199] flex items-center justify-center bg-zinc-950/90 backdrop-blur-sm">
-          <p className="text-sm text-zinc-400">プロフィールを確認しています…</p>
+          <LoadingSpinner
+            compact
+            label="プロフィールを確認しています…"
+            className="bg-transparent"
+          />
         </div>
       ) : null}
       {userId && profileGate === 'setup' ? (

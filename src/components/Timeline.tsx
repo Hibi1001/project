@@ -18,14 +18,20 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
-import { Post, InstrumentType, User } from '../types';
+import { Post, User } from '../types';
 import {
   fetchTimelinePosts,
   fetchTimelineBandProjects,
   fetchUserById,
   fetchReplyCountForPost,
-  type ReactionParticipantPreview,
 } from '../lib/api';
+import {
+  buildMergedTimelineFeed,
+  type FeedItem,
+  type TimelineBandProjectFeedItem,
+  type TimelineSongFeedItem,
+} from '../lib/timelineFeed';
+import LoadingSpinner from './LoadingSpinner';
 import { supabase } from '../lib/supabase';
 import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
@@ -64,41 +70,16 @@ interface TimelineProps {
   /** Open reply sheet for this post after feed is ready (e.g. from notification tap). */
   openReplyForPostId?: string | null;
   onConsumedOpenReplyForPostId?: () => void;
+  /** Logged-in user id from App — avoids a redundant getUser() on mount. */
+  authUserId?: string | null;
+  /**
+   * Initial feed from App (fetched in parallel with profile gate).
+   * When omitted, Timeline loads the feed itself (legacy / tests).
+   */
+  feedBootstrap?: { loading: boolean; items: FeedItem[] | null };
 }
 
 type DailyPostRow = { id: string; created_at: string };
-
-/** Song post slice in the merged timeline feed (discriminated by `itemType`). */
-type TimelineSongFeedItem = {
-  itemType: 'song';
-  created_at: string;
-  post: Post;
-  reactionParticipants: Record<
-    InstrumentType,
-    ReactionParticipantPreview[]
-  >;
-};
-
-/** Band recruitment slice — `userId` mirrors `owner_id` for shared user-fetch code paths. */
-type TimelineBandProjectFeedItem = {
-  itemType: 'band';
-  created_at: string;
-  id: string;
-  owner_id: string;
-  userId: string;
-  band_name: string;
-  description: string | null;
-  roles: {
-    id: string;
-    instrument_type: InstrumentType;
-    applicant_id: string | null;
-  }[];
-  albumArt: null;
-  previewUrl: null;
-  songTitle: string;
-};
-
-type FeedItem = TimelineSongFeedItem | TimelineBandProjectFeedItem;
 
 export default function Timeline({
   onViewProfile,
@@ -108,6 +89,8 @@ export default function Timeline({
   hasUnreadNotifications = false,
   openReplyForPostId = null,
   onConsumedOpenReplyForPostId,
+  authUserId: authUserIdProp,
+  feedBootstrap,
 }: TimelineProps) {
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const posts = useMemo(
@@ -166,6 +149,7 @@ export default function Timeline({
   const pullActiveRef = useRef(false);
   const pullTriggeredRef = useRef(false);
   const [manualRefreshNonce, setManualRefreshNonce] = useState(0);
+  const feedBootstrapConsumedRef = useRef(false);
 
   // NOTE: instrument icon maps are module-scope constants.
 
@@ -300,23 +284,30 @@ export default function Timeline({
   // Reactions UI has been redesigned into local-only `ReactionButtons`.
 
   useEffect(() => {
+    if (authUserIdProp) {
+      setAuthUserId(authUserIdProp);
+      setIsAuthLoading(false);
+    }
+
     let cancelled = false;
-    supabase.auth
-      .getUser()
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
+    if (!authUserIdProp) {
+      supabase.auth
+        .getUser()
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            setAuthUserId(null);
+          } else {
+            setAuthUserId(data.user?.id ?? null);
+          }
+          setIsAuthLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
           setAuthUserId(null);
-        } else {
-          setAuthUserId(data.user?.id ?? null);
-        }
-        setIsAuthLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAuthUserId(null);
-        setIsAuthLoading(false);
-      });
+          setIsAuthLoading(false);
+        });
+    }
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setAuthUserId(session?.user?.id ?? null);
@@ -327,7 +318,11 @@ export default function Timeline({
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [authUserIdProp]);
+
+  useEffect(() => {
+    feedBootstrapConsumedRef.current = false;
+  }, [authUserIdProp]);
 
   useEffect(() => {
     const loadTodaysPosts = async () => {
@@ -401,65 +396,7 @@ export default function Timeline({
   }, [openReplyForPostId, isLoading, feedItems, onConsumedOpenReplyForPostId]);
 
   useEffect(() => {
-    const loadPosts = async () => {
-      setIsLoading(true);
-      const [songRows, bandRows] = await Promise.all([
-        fetchTimelinePosts(),
-        fetchTimelineBandProjects(),
-      ]);
-      const seen = new Set<string>();
-      const dedupedSongs = songRows.filter((p) => {
-        if (seen.has(p.id)) return false;
-        seen.add(p.id);
-        return true;
-      });
-
-      const songItems: TimelineSongFeedItem[] = dedupedSongs.map((row) => {
-        const { createdAt, reactionParticipants, ...post } = row;
-        const ts =
-          typeof createdAt === 'string' && createdAt.trim()
-            ? createdAt
-            : new Date(0).toISOString();
-        const songItem: TimelineSongFeedItem = {
-          itemType: 'song',
-          created_at: ts,
-          post,
-          reactionParticipants,
-        };
-        return songItem;
-      });
-
-      const bandItems: TimelineBandProjectFeedItem[] = (bandRows ?? [])
-        .filter((b) => Boolean(b?.id && b?.owner_id))
-        .map((b) => {
-          const name = (b.band_name ?? '').trim() || 'バンド募集';
-          const oid = String(b.owner_id).trim();
-          const roles = Array.isArray(b.roles) ? b.roles : [];
-          const ts =
-            typeof b.created_at === 'string' && b.created_at.trim()
-              ? b.created_at
-              : new Date(0).toISOString();
-          const bandItem: TimelineBandProjectFeedItem = {
-            itemType: 'band',
-            created_at: ts,
-            id: b.id,
-            owner_id: oid,
-            userId: oid,
-            band_name: name,
-            description: b.description ?? null,
-            roles,
-            albumArt: null,
-            previewUrl: null,
-            songTitle: name,
-          };
-          return bandItem;
-        });
-
-      const merged = [...songItems, ...bandItems].sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      );
-
+    const applyMerged = (merged: FeedItem[]) => {
       setFeedItems(merged);
       const firstSong = merged.find(
         (i): i is TimelineSongFeedItem => i.itemType === 'song',
@@ -475,8 +412,55 @@ export default function Timeline({
       setIsLoading(false);
     };
 
-    loadPosts();
-  }, [timelineRefreshTrigger, seedRefreshNonce, manualRefreshNonce]);
+    const loadPostsFromNetwork = async () => {
+      setIsLoading(true);
+      try {
+        const [songRows, bandRows] = await Promise.all([
+          fetchTimelinePosts(),
+          fetchTimelineBandProjects(),
+        ]);
+        const merged = buildMergedTimelineFeed(songRows, bandRows);
+        applyMerged(merged);
+      } catch (e) {
+        console.error('[Timeline] loadPostsFromNetwork', e);
+        applyMerged([]);
+      }
+    };
+
+    const isRefresh =
+      timelineRefreshTrigger > 0 ||
+      seedRefreshNonce > 0 ||
+      manualRefreshNonce > 0;
+
+    if (feedBootstrap !== undefined) {
+      if (feedBootstrap.loading) {
+        setIsLoading(true);
+        return;
+      }
+      if (isRefresh) {
+        void loadPostsFromNetwork();
+        return;
+      }
+      if (!feedBootstrapConsumedRef.current && feedBootstrap.items != null) {
+        feedBootstrapConsumedRef.current = true;
+        applyMerged(feedBootstrap.items);
+        return;
+      }
+      // App should always pass `items` as an array when loading completes; if not, recover via network.
+      if (!feedBootstrapConsumedRef.current && feedBootstrap.items == null) {
+        void loadPostsFromNetwork();
+        return;
+      }
+      return;
+    }
+
+    void loadPostsFromNetwork();
+  }, [
+    timelineRefreshTrigger,
+    seedRefreshNonce,
+    manualRefreshNonce,
+    feedBootstrap,
+  ]);
 
   const triggerManualRefresh = useCallback(async () => {
     if (pullRefreshing || isLoading) return;
@@ -791,12 +775,18 @@ export default function Timeline({
 
   // Reaction state is handled locally per-post (no global refresh on focus).
 
-  if (isAuthLoading) {
+  if (feedBootstrap?.loading || isAuthLoading) {
     return (
       <>
         {devSeedButton}
-        <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-          <div className="text-sm text-zinc-400">Loading timeline...</div>
+        <div className="fixed inset-0 z-[120] bg-zinc-950">
+          <LoadingSpinner
+            label={
+              feedBootstrap?.loading
+                ? '読み込み中…'
+                : 'タイムラインを準備しています…'
+            }
+          />
         </div>
       </>
     );
@@ -824,8 +814,8 @@ export default function Timeline({
     return (
       <>
         {devSeedButton}
-        <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-          <div className="text-sm text-zinc-400">Loading timeline...</div>
+        <div className="fixed inset-0 z-[120] bg-zinc-950">
+          <LoadingSpinner label="読み込み中…" />
         </div>
       </>
     );
