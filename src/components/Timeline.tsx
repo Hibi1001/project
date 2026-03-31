@@ -730,7 +730,7 @@ export default function Timeline({
       {
         root,
         rootMargin: '0px 0px -8% 0px',
-        threshold: [0.6, 0.7, 0.8, 1],
+        threshold: [0.8, 0.9, 1],
       },
     );
 
@@ -800,7 +800,7 @@ export default function Timeline({
       if (!stillHasPreview) return;
       lastAutoplayAttemptRef.current = { postId: targetPostId, at: Date.now() };
       setIsPlaying(true);
-    }, 200);
+    }, 800);
 
     return () => {
       if (autoplayDelayRef.current) {
