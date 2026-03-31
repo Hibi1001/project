@@ -340,7 +340,7 @@ function App() {
 
   if (!passcodeOk) {
     return (
-      <div className="min-h-[100dvh] bg-zinc-950 text-zinc-50 flex items-center justify-center px-6">
+      <div className="min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50 flex items-center justify-center px-6">
         <div className="w-full max-w-sm bg-zinc-900/80 border border-zinc-800 rounded-2xl p-6 shadow-xl">
           <h1 className="text-lg font-semibold text-zinc-50 mb-2">
             Secret Passcode
@@ -355,12 +355,14 @@ function App() {
   }
 
   if (!authReady) {
-    return <div className="min-h-[100dvh] bg-zinc-950 text-zinc-50" />;
+    return (
+      <div className="min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50" />
+    );
   }
 
   if (!userId) {
     return (
-      <div className="min-h-[100dvh] bg-zinc-950 text-zinc-50">
+      <div className="min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50">
         <Login />
       </div>
     );
@@ -368,7 +370,7 @@ function App() {
 
   if (landscapeMobile) {
     return (
-      <div className="fixed inset-0 z-[999] flex min-h-[100dvh] flex-col items-center justify-center bg-zinc-950 px-6 text-zinc-50">
+      <div className="fixed inset-0 z-[999] flex min-h-[100dvh] w-full flex-col items-center justify-center overflow-x-hidden bg-zinc-950 px-6 text-zinc-50">
         <div className="flex flex-col items-center gap-4 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/60">
             <RotateCw className="h-7 w-7 text-zinc-300" strokeWidth={2} />
@@ -388,7 +390,7 @@ function App() {
     currentScreen === 'timeline' || currentScreen === 'notifications';
 
   return (
-    <div className="min-h-[100dvh] bg-zinc-950 text-zinc-50">
+    <div className="min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50">
       <AnimatePresence mode="wait">
         {currentScreen === 'lock' && (
           <LockScreen

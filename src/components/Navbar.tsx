@@ -24,9 +24,11 @@ export default function Navbar({
     <nav
       className="pointer-events-auto fixed bottom-0 left-0 right-0 z-50 w-full border-t border-zinc-800 bg-zinc-950 shadow-[0_-1px_0_0_rgba(24,24,27,0.65)]"
       aria-label="メインナビゲーション"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      style={{
+        paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)',
+      }}
     >
-      <div className="mx-auto flex h-14 max-w-lg items-center justify-between gap-3 px-4 pt-1">
+      <div className="mx-auto flex min-h-0 max-w-lg items-center justify-between gap-3 px-4 py-3">
         <div className="flex w-11 shrink-0 justify-start">
           {onOpenNotifications ? (
             <button
