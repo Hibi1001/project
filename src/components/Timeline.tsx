@@ -142,6 +142,7 @@ export default function Timeline({
   const skipPlayingResetRef = useRef(false);
   const spotifyPlayerRef = useRef<SpotifyPlayerHandle>(null);
   const [usersById, setUsersById] = useState<Record<string, User>>({});
+  const usersByIdRef = useRef<Record<string, User>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -617,40 +618,69 @@ export default function Timeline({
   }, [pullRefreshing, isLoading]);
 
   useEffect(() => {
+    usersByIdRef.current = usersById;
+  }, [usersById]);
+
+  const neededUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (authUserId) ids.add(authUserId);
+    for (const item of feedItems) {
+      if (item.itemType === 'song') {
+        ids.add(item.post.userId);
+        // Reaction participant stacks can introduce many IDs; still fetch, but only missing ones.
+        for (const p of Object.values(item.reactionParticipants).flat()) {
+          if (p.userId) ids.add(p.userId);
+        }
+      } else {
+        const uid = item.userId || item.owner_id;
+        if (uid) ids.add(uid);
+        for (const r of item.roles) {
+          if (r.applicant_id) ids.add(r.applicant_id);
+        }
+      }
+    }
+    return ids;
+  }, [feedItems, authUserId]);
+
+  const fetchUsersDebounceRef = useRef<number | null>(null);
+  useEffect(() => {
     if (feedItems.length === 0) {
       setUsersById({});
       return;
     }
     let cancelled = false;
-    (async () => {
-      const ids = new Set<string>();
-      if (authUserId) ids.add(authUserId);
-      for (const item of feedItems) {
-        if (item.itemType === 'song') {
-          ids.add(item.post.userId);
-          for (const p of Object.values(item.reactionParticipants).flat()) {
-            if (p.userId) ids.add(p.userId);
-          }
-        } else {
-          const uid = item.userId || item.owner_id;
-          if (uid) ids.add(uid);
-          for (const r of item.roles) {
-            if (r.applicant_id) ids.add(r.applicant_id);
-          }
-        }
-      }
-      const results = await Promise.all([...ids].map((id) => fetchUserById(id)));
-      if (cancelled) return;
-      const next: Record<string, User> = {};
-      results.forEach((u) => {
-        if (u) next[u.id] = u;
-      });
-      setUsersById(next);
-    })();
+
+    if (fetchUsersDebounceRef.current) {
+      clearTimeout(fetchUsersDebounceRef.current);
+      fetchUsersDebounceRef.current = null;
+    }
+
+    // Debounce + fetch missing-only: avoids re-reading lots of users on every reaction update.
+    fetchUsersDebounceRef.current = window.setTimeout(() => {
+      fetchUsersDebounceRef.current = null;
+      void (async () => {
+        const current = usersByIdRef.current;
+        const missing = [...neededUserIds].filter((id) => !current[id]);
+        if (missing.length === 0) return;
+        const results = await Promise.all(missing.map((id) => fetchUserById(id)));
+        if (cancelled) return;
+        const patch: Record<string, User> = {};
+        results.forEach((u) => {
+          if (u) patch[u.id] = u;
+        });
+        if (Object.keys(patch).length === 0) return;
+        setUsersById((prev) => ({ ...prev, ...patch }));
+      })();
+    }, 250);
+
     return () => {
       cancelled = true;
+      if (fetchUsersDebounceRef.current) {
+        clearTimeout(fetchUsersDebounceRef.current);
+        fetchUsersDebounceRef.current = null;
+      }
     };
-  }, [feedItems, authUserId]);
+  }, [feedItems.length, neededUserIds]);
 
   useEffect(() => {
     if (activePostId && !posts.some((p) => p.id === activePostId)) {
