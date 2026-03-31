@@ -47,6 +47,22 @@ const timelineSlideEnterMotion = {
   transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const },
 };
 
+const instrumentIcons = {
+  vocal: Mic,
+  guitar: Guitar,
+  bass: Music2,
+  drum: Drum,
+  keyboard: Piano,
+};
+
+const reactionInstrumentLabel: Record<InstrumentType, string> = {
+  vocal: 'ボーカル',
+  guitar: 'ギター',
+  bass: 'ベース',
+  drum: 'ドラム',
+  keyboard: 'キーボード',
+};
+
 interface TimelineProps {
   /** UUID or `display_id` for routing (`/@handle` or `/user/uuid`). */
   onViewProfile: (profileSlug: string) => void;
@@ -133,6 +149,15 @@ export default function Timeline({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewProgress, setPreviewProgress] = useState(0);
+  const [hasUserGesture, setHasUserGesture] = useState(false);
+  const [autoplayBlockedPostId, setAutoplayBlockedPostId] = useState<
+    string | null
+  >(null);
+  const lastAutoplayAttemptRef = useRef<{ postId: string; at: number } | null>(
+    null,
+  );
+  const autoplayDelayRef = useRef<number | null>(null);
+  const lastAutoAdvanceFromPostIdRef = useRef<string | null>(null);
   const [userReactionSet, setUserReactionSet] = useState<
     Set<InstrumentType>
   >(new Set());
@@ -154,21 +179,7 @@ export default function Timeline({
   const pullTriggeredRef = useRef(false);
   const [manualRefreshNonce, setManualRefreshNonce] = useState(0);
 
-  const instrumentIcons = {
-    vocal: Mic,
-    guitar: Guitar,
-    bass: Music2,
-    drum: Drum,
-    keyboard: Piano,
-  };
-
-  const reactionInstrumentLabel: Record<InstrumentType, string> = {
-    vocal: 'ボーカル',
-    guitar: 'ギター',
-    bass: 'ベース',
-    drum: 'ドラム',
-    keyboard: 'キーボード',
-  };
+  // NOTE: instrument icon maps are module-scope constants.
 
   /** Only a focused song post drives audio/reactions; `null` when a band card is focused. */
   const activePost =
@@ -726,6 +737,96 @@ export default function Timeline({
       obs.disconnect();
     };
   }, [feedItems, focusTimelineFromScroll]);
+
+  // Autoplay is allowed only after a user gesture (browser policy).
+  useEffect(() => {
+    if (hasUserGesture) return;
+    const onFirstGesture = () => {
+      setHasUserGesture(true);
+      setAutoplayBlockedPostId(null);
+    };
+    window.addEventListener('pointerdown', onFirstGesture, { once: true });
+    window.addEventListener('keydown', onFirstGesture, { once: true });
+    window.addEventListener('touchstart', onFirstGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', onFirstGesture);
+      window.removeEventListener('keydown', onFirstGesture);
+      window.removeEventListener('touchstart', onFirstGesture);
+    };
+  }, [hasUserGesture]);
+
+  // TikTok-style: when the active post changes, attempt to start playback automatically.
+  useEffect(() => {
+    if (autoplayDelayRef.current) {
+      clearTimeout(autoplayDelayRef.current);
+      autoplayDelayRef.current = null;
+    }
+
+    if (!activePostId) {
+      setAutoplayBlockedPostId(null);
+      setIsPlaying(false);
+      setPreviewProgress(0);
+      return;
+    }
+    const p = posts.find((x) => x.id === activePostId);
+    if (!p?.previewUrl?.trim()) {
+      setAutoplayBlockedPostId(null);
+      setIsPlaying(false);
+      setPreviewProgress(0);
+      return;
+    }
+
+    setAutoplayBlockedPostId(null);
+
+    // Debounced autoplay: prevents race where rapid IO changes cause play() then immediate pause().
+    const targetPostId = activePostId;
+    autoplayDelayRef.current = window.setTimeout(() => {
+      autoplayDelayRef.current = null;
+      if (activePostIdRef.current !== targetPostId) return;
+      lastAutoplayAttemptRef.current = { postId: targetPostId, at: Date.now() };
+      setIsPlaying(true);
+    }, 250);
+
+    return () => {
+      if (autoplayDelayRef.current) {
+        clearTimeout(autoplayDelayRef.current);
+        autoplayDelayRef.current = null;
+      }
+    };
+  }, [activePostId, posts]);
+
+  // If autoplay failed (SpotifyPlayer flips `playing` back to false), show a tap overlay.
+  useEffect(() => {
+    if (!activePostId) return;
+    if (isPlaying) return;
+    const attempt = lastAutoplayAttemptRef.current;
+    if (!attempt || attempt.postId !== activePostId) return;
+    if (Date.now() - attempt.at > 1200) return;
+    setAutoplayBlockedPostId(activePostId);
+  }, [isPlaying, activePostId]);
+
+  // Auto-advance to next post when the preview finishes.
+  useEffect(() => {
+    if (!activePostId) return;
+    if (isPlaying) return;
+    if (previewProgress < 0.999) return;
+    if (lastAutoAdvanceFromPostIdRef.current === activePostId) return;
+
+    const songIds = feedItems
+      .filter((i): i is TimelineSongFeedItem => i.itemType === 'song')
+      .map((i) => i.post.id);
+    const idx = songIds.findIndex((id) => id === activePostId);
+    if (idx < 0) return;
+    const nextId = songIds[idx + 1] ?? null;
+    if (!nextId) return;
+
+    lastAutoAdvanceFromPostIdRef.current = activePostId;
+    requestAnimationFrame(() => {
+      scrollRef.current
+        ?.querySelector(`[data-post-id="${nextId}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, [previewProgress, activePostId, isPlaying, feedItems]);
 
   const handleSeedTestData = async () => {
     setIsSeeding(true);
@@ -1299,6 +1400,21 @@ export default function Timeline({
               <div
                 className={`relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-col items-center gap-2 sm:gap-3 pb-24 ${isFirstSongSlide ? '' : '-mt-3 sm:-mt-4'}`}
               >
+                {autoplayBlockedPostId === post.id ? (
+                  <div className="pointer-events-none absolute inset-0 z-20 flex items-start justify-center pt-10">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAutoplayBlockedPostId(null);
+                        handlePlayForPost(post);
+                      }}
+                      className="pointer-events-auto rounded-full border border-emerald-400/35 bg-zinc-950/80 px-4 py-2 text-sm font-semibold text-emerald-200 shadow-lg shadow-emerald-500/10 backdrop-blur-md hover:bg-zinc-950"
+                    >
+                      タップして再生
+                    </button>
+                  </div>
+                ) : null}
                 <div className="relative mx-auto w-72 shrink-0 sm:w-80">
                   {post.previewUrl ? (
                     <button
