@@ -126,6 +126,10 @@ export default function Timeline({
         .map((i) => i.post),
     [feedItems],
   );
+  const postsRef = useRef<Post[]>([]);
+  useEffect(() => {
+    postsRef.current = posts;
+  }, [posts]);
   /** IO-suggested post (updates often while scrolling). */
   const [ioPostId, setIoPostId] = useState<string | null>(null);
   /** Debounced + “locked” for audio/reactions; immediate on play tap. */
@@ -238,6 +242,10 @@ export default function Timeline({
     if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
     scrollDebounceRef.current = setTimeout(() => {
       scrollDebounceRef.current = null;
+      // Prevent a one-frame “carryover” play on src change:
+      // we only want the delayed autoplay effect to start playback.
+      setIsPlaying(false);
+      setPreviewProgress(0);
       setActivePostId(postId);
     }, 280);
   }, []);
@@ -722,7 +730,7 @@ export default function Timeline({
       {
         root,
         rootMargin: '0px 0px -8% 0px',
-        threshold: [0, 0.05, 0.15, 0.25, 0.35, 0.5, 0.65, 0.8, 1],
+        threshold: [0.8, 0.9, 1],
       },
     );
 
@@ -768,7 +776,7 @@ export default function Timeline({
       setPreviewProgress(0);
       return;
     }
-    const p = posts.find((x) => x.id === activePostId);
+    const p = postsRef.current.find((x) => x.id === activePostId);
     if (!p?.previewUrl?.trim()) {
       setAutoplayBlockedPostId(null);
       setIsPlaying(false);
@@ -777,15 +785,22 @@ export default function Timeline({
     }
 
     setAutoplayBlockedPostId(null);
+    // Always start in a paused state, then start after debounce.
+    setIsPlaying(false);
+    setPreviewProgress(0);
 
     // Debounced autoplay: prevents race where rapid IO changes cause play() then immediate pause().
     const targetPostId = activePostId;
     autoplayDelayRef.current = window.setTimeout(() => {
       autoplayDelayRef.current = null;
       if (activePostIdRef.current !== targetPostId) return;
+      const stillHasPreview = Boolean(
+        postsRef.current.find((x) => x.id === targetPostId)?.previewUrl?.trim(),
+      );
+      if (!stillHasPreview) return;
       lastAutoplayAttemptRef.current = { postId: targetPostId, at: Date.now() };
       setIsPlaying(true);
-    }, 250);
+    }, 1000);
 
     return () => {
       if (autoplayDelayRef.current) {
@@ -793,7 +808,7 @@ export default function Timeline({
         autoplayDelayRef.current = null;
       }
     };
-  }, [activePostId, posts]);
+  }, [activePostId]);
 
   // If autoplay failed (SpotifyPlayer flips `playing` back to false), show a tap overlay.
   useEffect(() => {
