@@ -1066,7 +1066,7 @@ export default function Timeline({
                 data-timeline-post
                 data-item-type="band"
                 data-band-id={item.id}
-                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-48 pt-16"
+                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 pt-16"
                 style={{ scrollSnapAlign: 'start' }}
                 aria-label="バンド募集"
               >
@@ -1217,7 +1217,7 @@ export default function Timeline({
                   )}
                 </div>
                 <div
-                  className="mx-auto mt-6 w-full max-w-md px-2"
+                  className="mx-auto w-full max-w-md px-2"
                   role="presentation"
                 >
                   <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800/50">
@@ -1251,7 +1251,7 @@ export default function Timeline({
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-center px-6 pb-48 pt-10"
+              className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 pt-16"
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -1274,7 +1274,7 @@ export default function Timeline({
                 }}
               />
 
-              <div className="relative z-10 mx-auto flex w-full max-w-md flex-col items-center gap-3 sm:gap-4">
+              <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-col items-center gap-3 sm:gap-4">
                 <div className="relative mx-auto w-72 shrink-0 sm:w-80">
                   {post.previewUrl ? (
                     <button
@@ -1395,7 +1395,7 @@ export default function Timeline({
               </div>
 
               <div
-                className="mx-auto mt-6 w-full max-w-md px-2"
+                className="mx-auto w-full max-w-md px-2"
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
                 role="presentation"
