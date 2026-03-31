@@ -190,7 +190,7 @@ export default function Timeline({
         onOpenNotifications={onOpenNotifications}
         hasUnreadNotifications={hasUnreadNotifications}
         onOpenPost={() => onShareSong()}
-        postDisabled={dailyPosts.length >= DAILY_POST_LIMIT}
+        postDisabled={false}
         onOpenProfile={() => onViewProfile(myProfileSlug)}
         profileAvatarUrl={usersById[authUserId]?.avatar}
       />
@@ -768,7 +768,6 @@ export default function Timeline({
     );
   }
 
-  const fullyLocked = dailyPosts.length >= DAILY_POST_LIMIT;
   /** First song of the day: must share (or bypass) before seeing the feed. */
   const showLockGate =
     dailyPosts.length === 0 && !viewTimelineWithoutPostToday;
@@ -805,13 +804,7 @@ export default function Timeline({
         {timelineNavbar}
         <div className="fixed inset-0 flex flex-col items-center justify-center bg-zinc-950 px-6 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] pt-[env(safe-area-inset-top,0px)]">
           <div className="max-w-xs text-center text-sm text-zinc-400">
-            24時間以内のシェアはまだありません。あなたが最初の曲をシェアしませんか？（1日最大
-            {DAILY_POST_LIMIT}回まで）
-            {fullyLocked ? (
-              <span className="mt-3 block text-xs text-amber-400/90">
-                本日のシェア上限（{DAILY_POST_LIMIT}回）に達しています。
-              </span>
-            ) : null}
+            24時間以内のシェアはまだありません。あなたが最初の曲をシェアしませんか？
           </div>
         </div>
       </>

@@ -286,10 +286,6 @@ function App() {
     void refreshPostingState(uid);
   }, [createPostModalOpen, session?.user?.id, refreshPostingState]);
 
-  const atDailyLimit = todaysPostCount >= DAILY_POST_LIMIT;
-  const shareSongBlocked = atDailyLimit;
-  const dailyLimitMessageJa = `本日のシェア上限（${DAILY_POST_LIMIT}回）に達しました。明日0時（端末の日付切り替え）にリセットされます。`;
-
   /** 0 posts today → app LockScreen; 1+ posts today → Timeline (gate + “share another” live there). */
   useEffect(() => {
     if (currentScreen !== 'lock') return;
@@ -439,8 +435,6 @@ function App() {
         onClose={() => setCreatePostModalOpen(false)}
         onSubmitSuccess={handleCreatePostSuccess}
         userId={userId}
-        shareSongBlocked={shareSongBlocked}
-        shareLimitMessage={dailyLimitMessageJa}
       />
 
       {userId && profileGate === 'unknown' ? (
