@@ -1251,7 +1251,7 @@ export default function Timeline({
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 pt-16"
+              className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-48 pt-10"
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -1274,7 +1274,7 @@ export default function Timeline({
                 }}
               />
 
-              <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-col items-center gap-3 sm:gap-4">
+              <div className="relative z-10 mx-auto -mt-3 flex min-h-0 w-full max-w-md flex-col items-center gap-2 sm:gap-3 sm:-mt-4 pb-24">
                 <div className="relative mx-auto w-72 shrink-0 sm:w-80">
                   {post.previewUrl ? (
                     <button
@@ -1322,7 +1322,7 @@ export default function Timeline({
                   )}
                 </div>
 
-                <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
+                <div className="flex w-full flex-col items-center gap-2 text-center sm:gap-2.5">
                   <div className="flex w-full flex-col items-center gap-0.5">
                     <h2 className="text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
                       {post.songTitle}
@@ -1392,43 +1392,43 @@ export default function Timeline({
                 ) : (
                   <p className="text-xs text-zinc-500">プロフィール読込中…</p>
                 )}
-              </div>
 
-              <div
-                className="mx-auto w-full max-w-md px-2"
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
-                role="presentation"
-              >
-                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800/80">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
-                    style={{
-                      width:
-                        post.id === activePostId && post.previewUrl
-                          ? `${Math.min(100, Math.max(0, previewProgress) * 100)}%`
-                          : post.id === ioPostId
-                            ? '33%'
-                            : '12%',
-                      opacity:
-                        post.id === activePostId || post.id === ioPostId
-                          ? 1
-                          : 0.35,
-                      transition:
-                        post.id === activePostId && isPlaying
-                          ? 'opacity 0.2s ease'
-                          : 'width 0.15s linear, opacity 0.2s ease',
-                    }}
-                  />
+                <div
+                  className="mx-auto mt-1 w-full max-w-md px-2 pt-1"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  role="presentation"
+                >
+                  <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800/80">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
+                      style={{
+                        width:
+                          post.id === activePostId && post.previewUrl
+                            ? `${Math.min(100, Math.max(0, previewProgress) * 100)}%`
+                            : post.id === ioPostId
+                              ? '33%'
+                              : '12%',
+                        opacity:
+                          post.id === activePostId || post.id === ioPostId
+                            ? 1
+                            : 0.35,
+                        transition:
+                          post.id === activePostId && isPlaying
+                            ? 'opacity 0.2s ease'
+                            : 'width 0.15s linear, opacity 0.2s ease',
+                      }}
+                    />
+                  </div>
+                  <p className="mt-2 text-center text-xs text-zinc-500">
+                    {songPosition} / {feedItems.length}
+                    {post.id === activePostId && post.previewUrl ? (
+                      <span className="ml-2 text-[10px] text-zinc-600">
+                        プレビュー最大 {PREVIEW_UI_DURATION_SEC} 秒
+                      </span>
+                    ) : null}
+                  </p>
                 </div>
-                <p className="mt-2 text-center text-xs text-zinc-500">
-                  {songPosition} / {feedItems.length}
-                  {post.id === activePostId && post.previewUrl ? (
-                    <span className="ml-2 text-[10px] text-zinc-600">
-                      プレビュー最大 {PREVIEW_UI_DURATION_SEC} 秒
-                    </span>
-                  ) : null}
-                </p>
               </div>
             </section>
           );
