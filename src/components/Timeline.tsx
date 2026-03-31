@@ -24,8 +24,6 @@ import {
   fetchTimelineBandProjects,
   fetchUserById,
   fetchReplyCountForPost,
-  fetchReactionStateForPost,
-  notifyReactionToPost,
   type ReactionParticipantPreview,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
@@ -33,6 +31,7 @@ import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
 import Navbar from './Navbar';
 import PostReplySheet from './PostReplySheet';
+import ReactionButtons from './ReactionButtons';
 import SpotifyPlayer, {
   PREVIEW_UI_DURATION_SEC,
   type SpotifyPlayerHandle,
@@ -53,14 +52,6 @@ const instrumentIcons = {
   bass: Music2,
   drum: Drum,
   keyboard: Piano,
-};
-
-const reactionInstrumentLabel: Record<InstrumentType, string> = {
-  vocal: 'ボーカル',
-  guitar: 'ギター',
-  bass: 'ベース',
-  drum: 'ドラム',
-  keyboard: 'キーボード',
 };
 
 interface TimelineProps {
@@ -163,21 +154,12 @@ export default function Timeline({
   );
   const autoplayDelayRef = useRef<number | null>(null);
   const lastAutoAdvanceFromPostIdRef = useRef<string | null>(null);
-  const suppressIoUntilRef = useRef<number>(0);
-  const [userReactionSet, setUserReactionSet] = useState<
-    Set<InstrumentType>
-  >(new Set());
   const [replySheetOpen, setReplySheetOpen] = useState(false);
   const [replySheetPostId, setReplySheetPostId] = useState<string | null>(
     null,
   );
   const [bandDeleteBusyId, setBandDeleteBusyId] = useState<string | null>(null);
   const [bandRoleBusyId, setBandRoleBusyId] = useState<string | null>(null);
-  const [reactorSheet, setReactorSheet] = useState<{
-    postId: string;
-    instrument: InstrumentType;
-    participants: ReactionParticipantPreview[];
-  } | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const pullStartYRef = useRef<number | null>(null);
@@ -193,14 +175,7 @@ export default function Timeline({
       ? (posts.find((p) => p.id === activePostId) ?? null)
       : null;
 
-  const activeSongFeedItem = useMemo((): TimelineSongFeedItem | null => {
-    if (activePostId == null) return null;
-    const hit = feedItems.find(
-      (i): i is TimelineSongFeedItem =>
-        i.itemType === 'song' && i.post.id === activePostId,
-    );
-    return hit ?? null;
-  }, [feedItems, activePostId]);
+  // activeSongFeedItem (instrument reaction rail) removed.
 
   const myProfileSlug = useMemo(() => {
     if (!authUserId) return null;
@@ -322,108 +297,7 @@ export default function Timeline({
     setReplySheetPostId(null);
   };
 
-  const refreshReactionsForPost = async (postId: string, userId: string) => {
-    const state = await fetchReactionStateForPost(postId, userId);
-    if (!state) return;
-
-    setFeedItems((prev: FeedItem[]) =>
-      prev.map((item): FeedItem =>
-        item.itemType === 'song' && item.post.id === postId
-          ? {
-              ...item,
-              post: { ...item.post, reactions: state.counts },
-              reactionParticipants: state.participants,
-            }
-          : item,
-      ),
-    );
-    setUserReactionSet(state.mine);
-  };
-
-  const toggleReaction = (postId: string, instrument: InstrumentType) => {
-    if (!authUserId) return;
-    // Prevent IO jitter (caused by rerender/layout shifts) from flipping active post and pausing audio.
-    suppressIoUntilRef.current = Date.now() + 900;
-
-    const alreadyReacted = userReactionSet.has(instrument);
-
-    setUserReactionSet((prev) => {
-      const next = new Set(prev);
-      if (alreadyReacted) next.delete(instrument);
-      else next.add(instrument);
-      return next;
-    });
-    const selfPreview: ReactionParticipantPreview | null = authUserId
-      ? {
-          userId: authUserId,
-          name: usersById[authUserId]?.name ?? 'あなた',
-          avatar: usersById[authUserId]?.avatar ?? '',
-        }
-      : null;
-
-    setFeedItems((prev: FeedItem[]) =>
-      prev.map((item): FeedItem => {
-        if (item.itemType !== 'song' || item.post.id !== postId) return item;
-        const prevList = item.reactionParticipants[instrument];
-        const nextParticipants: Record<
-          InstrumentType,
-          ReactionParticipantPreview[]
-        > = { ...item.reactionParticipants };
-        if (alreadyReacted) {
-          nextParticipants[instrument] = prevList.filter(
-            (p) => p.userId !== authUserId,
-          );
-        } else if (selfPreview) {
-          nextParticipants[instrument] = [
-            selfPreview,
-            ...prevList.filter((p) => p.userId !== authUserId),
-          ];
-        }
-        return {
-          ...item,
-          reactionParticipants: nextParticipants,
-          post: {
-            ...item.post,
-            reactions: {
-              ...item.post.reactions,
-              [instrument]: Math.max(
-                0,
-                item.post.reactions[instrument] + (alreadyReacted ? -1 : 1),
-              ),
-            },
-          },
-        };
-      }),
-    );
-
-    void (async () => {
-      try {
-        if (!alreadyReacted) {
-          const { error: insertError } = await supabase.from('reactions').insert({
-            post_id: postId,
-            user_id: authUserId,
-            instrument_type: instrument,
-          });
-          if (insertError) throw insertError;
-          void notifyReactionToPost(postId, authUserId);
-        } else {
-          const { error: deleteError } = await supabase
-            .from('reactions')
-            .delete()
-            .eq('post_id', postId)
-            .eq('user_id', authUserId)
-            .eq('instrument_type', instrument);
-          if (deleteError) throw deleteError;
-        }
-      } catch (err) {
-        console.error('Reaction sync failed', err);
-        await refreshReactionsForPost(postId, authUserId);
-        window.alert(
-          'リアクションを更新できませんでした。通信状況を確認して、もう一度お試しください。',
-        );
-      }
-    })();
-  };
+  // Reactions UI has been redesigned into local-only `ReactionButtons`.
 
   useEffect(() => {
     let cancelled = false;
@@ -761,13 +635,6 @@ export default function Timeline({
         if (!(bestEl instanceof HTMLElement)) return;
         const itemType = bestEl.dataset.itemType as 'song' | 'band' | undefined;
         const postId = bestEl.dataset.postId ?? null;
-        // While reacting, suppress IO-driven focus flips caused by tiny layout shifts.
-        // This prevents activePostId churn that would pause audio mid-play.
-        if (Date.now() < suppressIoUntilRef.current) {
-          const cur = activePostIdRef.current;
-          if (cur && postId && postId !== cur) return;
-        }
-
         if (itemType === 'band') {
           focusTimelineFromScroll('band', null);
         } else if (itemType === 'song' && postId) {
@@ -922,11 +789,7 @@ export default function Timeline({
       </button>
     ) : null;
 
-  useEffect(() => {
-    if (!authUserId || !activePost) return;
-    refreshReactionsForPost(activePost.id, authUserId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUserId, activePost?.id, posts.length]);
+  // Reaction state is handled locally per-post (no global refresh on focus).
 
   if (isAuthLoading) {
     return (
@@ -1573,6 +1436,21 @@ export default function Timeline({
                       </button>
                     ) : null}
                   </div>
+
+                  <ReactionButtons
+                    postId={post.id}
+                    trackName={post.songTitle}
+                    artistName={post.artist}
+                    appleMusicUrl={null}
+                    initialLikeCount={
+                      Object.values(post.reactions ?? {}).reduce(
+                        (sum, n) => sum + (typeof n === 'number' ? n : 0),
+                        0,
+                      ) || 0
+                    }
+                    initialIsLiked={false}
+                    userId={authUserId}
+                  />
                 </div>
 
                 {postUser ? (
@@ -1665,147 +1543,7 @@ export default function Timeline({
         />
       </div>
 
-      {/* Reaction rail follows the active (debounced) post */}
-      {activePost ? (
-        <div className="pointer-events-auto fixed bottom-[calc(0.5rem+3rem+env(safe-area-inset-bottom,0px))] left-1/2 z-40 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
-          {(Object.keys(instrumentIcons) as InstrumentType[]).map(
-            (instrument) => {
-              const Icon = instrumentIcons[instrument];
-              const count = activePost.reactions[instrument];
-              const isMine = userReactionSet.has(instrument);
-              const participants =
-                activeSongFeedItem?.reactionParticipants[instrument] ?? [];
-              const stack = participants.slice(0, 3);
-              return (
-                <div
-                  key={instrument}
-                  className="flex flex-col items-center gap-1"
-                >
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() =>
-                      toggleReaction(activePost.id, instrument)
-                    }
-                    className="group flex flex-col items-center"
-                    aria-label={`${reactionInstrumentLabel[instrument]}でリアクション`}
-                  >
-                    <div
-                      className={`flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900/85 backdrop-blur-md transition-all group-hover:scale-110 group-hover:bg-emerald-500/20 ${
-                        isMine
-                          ? 'bg-emerald-500/10 ring-2 ring-emerald-500/60'
-                          : ''
-                      }`}
-                    >
-                      <Icon
-                        className={`h-6 w-6 transition-colors ${
-                          isMine
-                            ? 'text-emerald-400'
-                            : 'text-zinc-400 group-hover:text-emerald-400'
-                        }`}
-                      />
-                    </div>
-                  </motion.button>
-                  <button
-                    type="button"
-                    disabled={count === 0}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (count === 0) return;
-                      setReactorSheet({
-                        postId: activePost.id,
-                        instrument,
-                        participants,
-                      });
-                    }}
-                    title={
-                      count > 0
-                        ? `${reactionInstrumentLabel[instrument]} ${count} 件`
-                        : undefined
-                    }
-                    className="flex min-h-[1.75rem] items-center justify-center gap-1 rounded-lg px-1 disabled:cursor-default disabled:opacity-40"
-                  >
-                    {stack.length > 0 ? (
-                      <div className="flex items-center -space-x-2 pr-0.5">
-                        {stack.map((p, idx) => (
-                          <img
-                            key={`${p.userId}-${idx}`}
-                            src={
-                              p.avatar ||
-                              'https://placehold.co/64x64?text=U'
-                            }
-                            alt=""
-                            className="h-6 w-6 rounded-full border-2 border-zinc-950 object-cover ring-1 ring-zinc-700/90"
-                          />
-                        ))}
-                      </div>
-                    ) : null}
-                    <span className="text-xs font-semibold tabular-nums text-zinc-400">
-                      {count}
-                    </span>
-                  </button>
-                </div>
-              );
-            },
-          )}
-        </div>
-      ) : null}
-
-      {reactorSheet ? (
-        <div
-          className="fixed inset-0 z-[90] flex items-end justify-center bg-black/65 backdrop-blur-[2px] sm:items-center"
-          role="presentation"
-          onClick={() => setReactorSheet(null)}
-        >
-          <div
-            role="dialog"
-            aria-labelledby="reactor-sheet-title"
-            className="max-h-[min(70dvh,28rem)] w-full max-w-sm overflow-hidden rounded-t-2xl border border-zinc-800 bg-zinc-900 shadow-2xl sm:rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="border-b border-zinc-800 px-4 py-3">
-              <h2
-                id="reactor-sheet-title"
-                className="text-sm font-semibold text-zinc-100"
-              >
-                {reactionInstrumentLabel[reactorSheet.instrument]} リアクション
-              </h2>
-              <p className="mt-0.5 text-xs text-zinc-500">
-                Reacted by（{reactorSheet.participants.length} 人）
-              </p>
-            </div>
-            <ul className="max-h-[min(50dvh,20rem)] space-y-1 overflow-y-auto p-3">
-              {reactorSheet.participants.map((p) => (
-                <li
-                  key={p.userId}
-                  className="flex items-center gap-3 rounded-xl bg-zinc-950/60 px-2 py-2"
-                >
-                  <img
-                    src={
-                      p.avatar || 'https://placehold.co/64x64?text=U'
-                    }
-                    alt=""
-                    className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-zinc-700/80"
-                  />
-                  <span className="min-w-0 truncate text-sm font-medium text-zinc-200">
-                    {p.name}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <div className="border-t border-zinc-800 p-3">
-              <button
-                type="button"
-                onClick={() => setReactorSheet(null)}
-                className="w-full rounded-xl bg-zinc-800 py-2.5 text-sm font-semibold text-zinc-200 transition-colors hover:bg-zinc-700"
-              >
-                閉じる
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {/* Reactor sheet removed (instrument reactions deprecated). */}
     </>
   );
 }
