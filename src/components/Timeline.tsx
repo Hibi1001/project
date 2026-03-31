@@ -1264,7 +1264,7 @@ export default function Timeline({
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className={`relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start overflow-hidden px-6 pb-48 ${isFirstSongSlide ? 'pt-16' : 'pt-10'}`}
+              className={`relative isolate box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start overflow-hidden px-6 pb-48 ${isFirstSongSlide ? 'pt-16' : 'pt-10'}`}
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -1284,13 +1284,15 @@ export default function Timeline({
                   backgroundImage: `url(${post.albumArt})`,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
-                  filter: 'blur(80px) brightness(0.4)',
-                  opacity: 0.5,
+                  filter: 'blur(100px) brightness(0.3)',
+                  transform: 'scale(1.2) translateZ(0)',
+                  transformOrigin: 'center center',
+                  opacity: 0.6,
                 }}
                 aria-hidden
               />
               <div
-                className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-b from-zinc-950/65 via-zinc-950/45 to-zinc-950/75"
+                className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-b from-zinc-950/45 via-zinc-950/30 to-zinc-950/55"
                 aria-hidden
               />
 
