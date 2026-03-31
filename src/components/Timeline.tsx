@@ -39,6 +39,14 @@ import SpotifyPlayer, {
 } from './SpotifyPlayer';
 import { DAILY_POST_LIMIT } from '../constants/posting';
 
+/** Soft fade + slide-up when a snap slide enters the viewport (framer-motion). */
+const timelineSlideEnterMotion = {
+  initial: { opacity: 0, y: 22 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, amount: 0.32 },
+  transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const },
+};
+
 interface TimelineProps {
   /** UUID or `display_id` for routing (`/@handle` or `/user/uuid`). */
   onViewProfile: (profileSlug: string) => void;
@@ -1061,7 +1069,7 @@ export default function Timeline({
               ) + 1;
 
             return (
-              <section
+              <motion.section
                 key={item.id}
                 data-timeline-post
                 data-item-type="band"
@@ -1069,8 +1077,9 @@ export default function Timeline({
                 className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 pt-16"
                 style={{ scrollSnapAlign: 'start' }}
                 aria-label="バンド募集"
+                {...timelineSlideEnterMotion}
               >
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-900/95 to-emerald-950/35 opacity-[0.92]" />
+                <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-zinc-950 via-zinc-900/95 to-emerald-950/35 opacity-[0.92]" />
                 <div className="relative z-10 mx-auto h-auto w-full max-w-md rounded-2xl border border-white/[0.08] bg-zinc-900/55 p-6 shadow-xl ring-1 ring-emerald-500/15 backdrop-blur-md sm:p-7">
                   <div className="mb-4 flex items-center justify-center gap-2 text-emerald-400/95">
                     <span className="text-4xl" aria-hidden>
@@ -1227,7 +1236,7 @@ export default function Timeline({
                     {bandPosition} / {feedItems.length}
                   </p>
                 </div>
-              </section>
+              </motion.section>
             );
           }
 
@@ -1250,12 +1259,12 @@ export default function Timeline({
           const isFirstSongSlide = songOrdinal === 0;
 
           return (
-            <section
+            <motion.section
               key={post.id}
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className={`relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-48 ${isFirstSongSlide ? 'pt-16' : 'pt-10'}`}
+              className={`relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start overflow-hidden px-6 pb-48 ${isFirstSongSlide ? 'pt-16' : 'pt-10'}`}
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -1267,15 +1276,22 @@ export default function Timeline({
               role="button"
               tabIndex={0}
               aria-label="返信を開く"
+              {...timelineSlideEnterMotion}
             >
               <div
-                className="pointer-events-none absolute inset-0 opacity-20"
+                className="pointer-events-none absolute inset-0 z-0"
                 style={{
                   backgroundImage: `url(${post.albumArt})`,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
-                  filter: 'blur(56px)',
+                  filter: 'blur(80px) brightness(0.4)',
+                  opacity: 0.5,
                 }}
+                aria-hidden
+              />
+              <div
+                className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-b from-zinc-950/65 via-zinc-950/45 to-zinc-950/75"
+                aria-hidden
               />
 
               <div
@@ -1436,7 +1452,7 @@ export default function Timeline({
                   </p>
                 </div>
               </div>
-            </section>
+            </motion.section>
           );
         })}
 

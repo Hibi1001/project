@@ -54,7 +54,7 @@ export default function Navbar({
             disabled={postDisabled}
             title={
               postDisabled
-                ? '本日のシェア上限に達しています'
+                ? '現在はシェアボタンを利用できません'
                 : '曲をシェア'
             }
             className={`flex h-11 w-11 items-center justify-center rounded-full border-2 border-emerald-400/40 bg-emerald-500 text-white shadow-md shadow-emerald-500/20 transition-transform hover:border-emerald-300/50 hover:bg-emerald-400 active:scale-[0.97] disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none`}
