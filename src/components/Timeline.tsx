@@ -1444,21 +1444,28 @@ export default function Timeline({
         </footer>
       </div>
 
-      <SpotifyPlayer
-        ref={spotifyPlayerRef}
-        src={
-          activePost?.previewUrl?.trim()
-            ? activePost.previewUrl
-            : null
-        }
-        playing={isPlaying}
-        setPlaying={setIsPlaying}
-        onProgress={setPreviewProgress}
-      />
+      <div
+        className="pointer-events-none fixed left-0 right-0 z-[35] h-0 overflow-hidden"
+        style={{
+          bottom: 'calc(3rem + env(safe-area-inset-bottom, 0px))',
+        }}
+      >
+        <SpotifyPlayer
+          ref={spotifyPlayerRef}
+          src={
+            activePost?.previewUrl?.trim()
+              ? activePost.previewUrl
+              : null
+          }
+          playing={isPlaying}
+          setPlaying={setIsPlaying}
+          onProgress={setPreviewProgress}
+        />
+      </div>
 
       {/* Reaction rail follows the active (debounced) post */}
       {activePost ? (
-        <div className="pointer-events-auto fixed bottom-[calc(env(safe-area-inset-bottom,0px)+3.5rem+0.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
+        <div className="pointer-events-auto fixed bottom-[calc(0.5rem+3rem+env(safe-area-inset-bottom,0px))] left-1/2 z-40 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
           {(Object.keys(instrumentIcons) as InstrumentType[]).map(
             (instrument) => {
               const Icon = instrumentIcons[instrument];

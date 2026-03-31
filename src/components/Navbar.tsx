@@ -22,13 +22,10 @@ export default function Navbar({
 }: NavbarProps) {
   return (
     <nav
-      className="pointer-events-auto fixed bottom-0 left-0 right-0 z-50 w-full border-t border-zinc-800 bg-zinc-950 shadow-[0_-1px_0_0_rgba(24,24,27,0.65)]"
+      className="pointer-events-auto fixed bottom-0 left-0 right-0 z-50 flex w-full flex-col border-t border-zinc-800 bg-zinc-950 shadow-[0_-1px_0_0_rgba(24,24,27,0.65)]"
       aria-label="メインナビゲーション"
-      style={{
-        paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)',
-      }}
     >
-      <div className="mx-auto flex min-h-0 max-w-lg items-center justify-between gap-3 px-4 py-3">
+      <div className="flex h-12 w-full min-h-0 items-center justify-between px-8">
         <div className="flex w-11 shrink-0 justify-start">
           {onOpenNotifications ? (
             <button
@@ -50,7 +47,7 @@ export default function Navbar({
           )}
         </div>
 
-        <div className="flex flex-1 justify-center">
+        <div className="flex shrink-0 justify-center">
           <button
             type="button"
             onClick={onOpenPost}
@@ -86,6 +83,11 @@ export default function Navbar({
           </button>
         </div>
       </div>
+      <div
+        className="w-full bg-zinc-950"
+        style={{ height: 'env(safe-area-inset-bottom, 0px)' }}
+        aria-hidden
+      />
     </nav>
   );
 }
