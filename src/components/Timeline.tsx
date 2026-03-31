@@ -15,8 +15,8 @@ import {
   Drum,
   Piano,
   MessageCircle,
+  RefreshCw,
   Trash2,
-  User as UserIcon,
 } from 'lucide-react';
 import { Post, InstrumentType, User } from '../types';
 import {
@@ -25,11 +25,13 @@ import {
   fetchUserById,
   fetchReplyCountForPost,
   fetchReactionStateForPost,
+  notifyReactionToPost,
   type ReactionParticipantPreview,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
+import Navbar from './Navbar';
 import PostReplySheet from './PostReplySheet';
 import SpotifyPlayer, {
   PREVIEW_UI_DURATION_SEC,
@@ -42,6 +44,11 @@ interface TimelineProps {
   onViewProfile: (profileSlug: string) => void;
   onShareSong: () => void;
   timelineRefreshTrigger?: number;
+  onOpenNotifications?: () => void;
+  hasUnreadNotifications?: boolean;
+  /** Open reply sheet for this post after feed is ready (e.g. from notification tap). */
+  openReplyForPostId?: string | null;
+  onConsumedOpenReplyForPostId?: () => void;
 }
 
 type DailyPostRow = { id: string; created_at: string };
@@ -82,6 +89,10 @@ export default function Timeline({
   onViewProfile,
   onShareSong,
   timelineRefreshTrigger = 0,
+  onOpenNotifications,
+  hasUnreadNotifications = false,
+  openReplyForPostId = null,
+  onConsumedOpenReplyForPostId,
 }: TimelineProps) {
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const posts = useMemo(
@@ -128,6 +139,12 @@ export default function Timeline({
     instrument: InstrumentType;
     participants: ReactionParticipantPreview[];
   } | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const pullStartYRef = useRef<number | null>(null);
+  const pullActiveRef = useRef(false);
+  const pullTriggeredRef = useRef(false);
+  const [manualRefreshNonce, setManualRefreshNonce] = useState(0);
 
   const instrumentIcons = {
     vocal: Mic,
@@ -167,24 +184,16 @@ export default function Timeline({
     return authUserId;
   }, [authUserId, usersById]);
 
-  const myProfileNav =
+  const timelineNavbar =
     authUserId && myProfileSlug ? (
-      <button
-        type="button"
-        onClick={() => onViewProfile(myProfileSlug)}
-        className="fixed right-4 z-50 flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-zinc-800 bg-zinc-900/90 shadow-lg backdrop-blur-sm transition-opacity hover:opacity-90 active:scale-[0.98] top-[calc(1rem+env(safe-area-inset-top,0px))]"
-        aria-label="マイプロフィール"
-      >
-        {usersById[authUserId]?.avatar?.trim() ? (
-          <img
-            src={usersById[authUserId].avatar}
-            alt=""
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <UserIcon className="h-5 w-5 text-zinc-300" strokeWidth={1.75} />
-        )}
-      </button>
+      <Navbar
+        onOpenNotifications={onOpenNotifications}
+        hasUnreadNotifications={hasUnreadNotifications}
+        onOpenPost={() => onShareSong()}
+        postDisabled={dailyPosts.length >= DAILY_POST_LIMIT}
+        onOpenProfile={() => onViewProfile(myProfileSlug)}
+        profileAvatarUrl={usersById[authUserId]?.avatar}
+      />
     ) : null;
 
   const replySheetPost =
@@ -358,6 +367,7 @@ export default function Timeline({
             instrument_type: instrument,
           });
           if (insertError) throw insertError;
+          void notifyReactionToPost(postId, authUserId);
         } else {
           const { error: deleteError } = await supabase
             .from('reactions')
@@ -450,6 +460,35 @@ export default function Timeline({
   }, [dailyPosts.length]);
 
   useEffect(() => {
+    if (!openReplyForPostId || isLoading) return;
+    const hasPost = feedItems.some(
+      (i) => i.itemType === 'song' && i.post.id === openReplyForPostId,
+    );
+    if (hasPost) return;
+    onConsumedOpenReplyForPostId?.();
+    window.alert(
+      'この投稿はタイムラインに表示されていません（24時間を過ぎた可能性があります）。',
+    );
+  }, [openReplyForPostId, isLoading, feedItems, onConsumedOpenReplyForPostId]);
+
+  useEffect(() => {
+    if (!openReplyForPostId || isLoading) return;
+    const hasPost = feedItems.some(
+      (i) => i.itemType === 'song' && i.post.id === openReplyForPostId,
+    );
+    if (!hasPost) return;
+    const pid = openReplyForPostId;
+    requestAnimationFrame(() => {
+      const el = scrollRef.current?.querySelector(`[data-post-id="${pid}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    setActivePostId(pid);
+    setReplySheetPostId(pid);
+    setReplySheetOpen(true);
+    onConsumedOpenReplyForPostId?.();
+  }, [openReplyForPostId, isLoading, feedItems, onConsumedOpenReplyForPostId]);
+
+  useEffect(() => {
     const loadPosts = async () => {
       setIsLoading(true);
       const [songRows, bandRows] = await Promise.all([
@@ -525,7 +564,20 @@ export default function Timeline({
     };
 
     loadPosts();
-  }, [timelineRefreshTrigger, seedRefreshNonce]);
+  }, [timelineRefreshTrigger, seedRefreshNonce, manualRefreshNonce]);
+
+  const triggerManualRefresh = useCallback(async () => {
+    if (pullRefreshing || isLoading) return;
+    setPullRefreshing(true);
+    try {
+      setManualRefreshNonce((n) => n + 1);
+      // Wait until next tick so loading UI can appear.
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      // Hide spinner shortly after refresh kicks off; the actual list loading uses `isLoading`.
+      setTimeout(() => setPullRefreshing(false), 300);
+    }
+  }, [pullRefreshing, isLoading]);
 
   useEffect(() => {
     if (feedItems.length === 0) {
@@ -693,7 +745,7 @@ export default function Timeline({
         type="button"
         onClick={handleSeedTestData}
         disabled={isSeeding}
-        className="fixed top-3 left-3 z-[100] rounded-lg border border-amber-500/50 bg-amber-950/90 px-3 py-1.5 text-xs font-semibold text-amber-200 shadow-lg backdrop-blur-sm hover:bg-amber-900/90 disabled:opacity-60"
+        className="fixed left-3 top-3 z-[100] rounded-lg border border-amber-500/50 bg-amber-950/90 px-3 py-1.5 text-xs font-semibold text-amber-200 shadow-lg backdrop-blur-sm hover:bg-amber-900/90 disabled:opacity-60"
       >
         {isSeeding ? 'Seeding…' : 'Seed Test Data'}
       </button>
@@ -747,25 +799,11 @@ export default function Timeline({
   }
 
   if (!posts.length) {
-    const showShareCta = dailyPosts.length < DAILY_POST_LIMIT;
     return (
       <>
         {devSeedButton}
-        {myProfileNav}
-        {showShareCta ? (
-          <div className="pointer-events-none fixed left-0 right-0 top-0 z-[25] flex justify-center px-4 pt-[max(0.5rem,env(safe-area-inset-top))]">
-            <button
-              type="button"
-              onClick={() => onShareSong()}
-              className="pointer-events-auto rounded-full border border-emerald-500/40 bg-zinc-950/90 px-4 py-2 text-xs font-semibold text-emerald-300 shadow-lg backdrop-blur-md transition-colors hover:border-emerald-400/60 hover:bg-zinc-900/95 hover:text-emerald-200"
-            >
-              {dailyPosts.length === 0
-                ? `曲をシェア（本日 ${dailyPosts.length}/${DAILY_POST_LIMIT}）`
-                : `もう1曲シェアする（本日 ${dailyPosts.length}/${DAILY_POST_LIMIT}）`}
-            </button>
-          </div>
-        ) : null}
-        <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
+        {timelineNavbar}
+        <div className="fixed inset-0 flex flex-col items-center justify-center bg-zinc-950 px-6 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] pt-[env(safe-area-inset-top,0px)]">
           <div className="max-w-xs text-center text-sm text-zinc-400">
             24時間以内のシェアはまだありません。あなたが最初の曲をシェアしませんか？（1日最大
             {DAILY_POST_LIMIT}回まで）
@@ -933,24 +971,10 @@ export default function Timeline({
     }
   };
 
-  const showShareAnotherEntry =
-    dailyPosts.length > 0 && dailyPosts.length < DAILY_POST_LIMIT;
-
   return (
     <>
       {devSeedButton}
-      {myProfileNav}
-      {showShareAnotherEntry ? (
-        <div className="pointer-events-none fixed left-0 right-0 top-0 z-[25] flex justify-center px-4 pt-[max(0.5rem,env(safe-area-inset-top))]">
-          <button
-            type="button"
-            onClick={() => onShareSong()}
-            className="pointer-events-auto rounded-full border border-emerald-500/40 bg-zinc-950/90 px-4 py-2 text-xs font-semibold text-emerald-300 shadow-lg backdrop-blur-md transition-colors hover:border-emerald-400/60 hover:bg-zinc-900/95 hover:text-emerald-200"
-          >
-            もう1曲シェアする（本日 {dailyPosts.length}/{DAILY_POST_LIMIT}）
-          </button>
-        </div>
-      ) : null}
+      {timelineNavbar}
       <PostReplySheet
         postId={replySheetPostId}
         open={replySheetOpen}
@@ -962,9 +986,75 @@ export default function Timeline({
 
       <div
         ref={scrollRef}
-        className="fixed left-0 right-0 top-0 box-border h-[100dvh] w-full snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y bg-zinc-950 pt-[env(safe-area-inset-top,0px)] [-webkit-overflow-scrolling:touch]"
+        className="fixed left-0 right-0 top-0 box-border h-[100dvh] w-full snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y bg-zinc-950 scroll-pb-[calc(16rem+env(safe-area-inset-bottom,0px))] scroll-pt-[env(safe-area-inset-top,0px)] [-webkit-overflow-scrolling:touch]"
         style={{ scrollSnapType: 'y mandatory' }}
+        onTouchStart={(e) => {
+          if (pullRefreshing || isLoading) return;
+          if (e.touches.length !== 1) return;
+          const el = scrollRef.current;
+          if (!el) return;
+          if (el.scrollTop > 0) return;
+          pullStartYRef.current = e.touches[0].clientY;
+          pullActiveRef.current = true;
+          pullTriggeredRef.current = false;
+          setPullDistance(0);
+        }}
+        onTouchMove={(e) => {
+          if (!pullActiveRef.current) return;
+          if (pullRefreshing || isLoading) return;
+          const start = pullStartYRef.current;
+          if (start == null) return;
+          const dy = e.touches[0].clientY - start;
+          if (dy <= 0) {
+            setPullDistance(0);
+            return;
+          }
+          // Damp for a more natural feel.
+          const damped = Math.min(120, dy * 0.55);
+          setPullDistance(damped);
+          if (damped > 72) {
+            pullTriggeredRef.current = true;
+          }
+        }}
+        onTouchEnd={() => {
+          if (!pullActiveRef.current) return;
+          pullActiveRef.current = false;
+          pullStartYRef.current = null;
+          const shouldRefresh = pullTriggeredRef.current;
+          pullTriggeredRef.current = false;
+          setPullDistance(0);
+          if (shouldRefresh) {
+            void triggerManualRefresh();
+          }
+        }}
       >
+        <div
+          className="pointer-events-none sticky top-0 z-10 flex w-full justify-center"
+          aria-hidden
+          style={{
+            height: pullDistance > 0 || pullRefreshing ? Math.max(32, pullDistance) : 0,
+            transition:
+              pullDistance === 0 && !pullRefreshing ? 'height 180ms ease' : undefined,
+          }}
+        >
+          <div
+            className="mt-2 flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/90 px-3 py-1.5 text-xs text-zinc-400 backdrop-blur-md"
+            style={{
+              opacity: pullDistance > 0 || pullRefreshing ? 1 : 0,
+              transform: `translateY(${Math.min(12, pullDistance * 0.15)}px)`,
+              transition: 'opacity 150ms ease',
+            }}
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${pullRefreshing || pullDistance > 72 ? 'animate-spin' : ''}`}
+              strokeWidth={2}
+            />
+            <span>
+              {pullRefreshing ? '更新中…' : pullDistance > 72 ? '離して更新' : '引っ張って更新'}
+            </span>
+          </div>
+        </div>
+
         {feedItems.map((item) => {
           if (item.itemType === 'band') {
             const ownerKey = item.userId || item.owner_id;
@@ -983,7 +1073,7 @@ export default function Timeline({
                 data-timeline-post
                 data-item-type="band"
                 data-band-id={item.id}
-                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-40 pt-16"
+                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start px-6 pb-48 pt-16"
                 style={{ scrollSnapAlign: 'start' }}
                 aria-label="バンド募集"
               >
@@ -1168,7 +1258,7 @@ export default function Timeline({
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-center px-6 pb-40 pt-10"
+              className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-center px-6 pb-48 pt-10"
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -1240,20 +1330,26 @@ export default function Timeline({
                 </div>
 
                 <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
-                  <h2 className="text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
-                    {post.songTitle}
-                  </h2>
-                  <p className="text-balance text-lg leading-snug text-zinc-400 sm:text-xl">
-                    {post.artist}
-                  </p>
-
-                  {post.caption?.trim() ? (
-                    <div className="w-full max-w-sm px-0.5">
-                      <p className="max-h-[min(28dvh,9.5rem)] overflow-y-auto break-words rounded-2xl border border-white/[0.08] bg-black/40 px-3.5 py-2.5 text-left text-sm font-normal leading-relaxed tracking-wide text-zinc-200/95 shadow-lg [-webkit-overflow-scrolling:touch] backdrop-blur-md sm:max-h-[min(32dvh,12rem)] sm:px-4 sm:text-[0.9375rem]">
-                        {post.caption.trim()}
+                  <div className="flex w-full flex-col items-center gap-0.5">
+                    <h2 className="text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
+                      {post.songTitle}
+                    </h2>
+                    <p className="text-balance text-lg leading-snug text-zinc-400 sm:text-xl">
+                      {post.artist}
+                    </p>
+                    {post.caption?.trim() ? (
+                      <p className="mt-1 flex max-w-sm items-start justify-center gap-1.5 px-2 text-sm italic leading-snug text-zinc-400/90">
+                        <MessageCircle
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500/70"
+                          strokeWidth={1.75}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 text-balance">
+                          {post.caption.trim()}
+                        </span>
                       </p>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
 
                   <div className="mt-0.5 flex flex-wrap items-center justify-center gap-2">
                     <button
@@ -1345,7 +1441,7 @@ export default function Timeline({
           );
         })}
 
-        <footer className="flex min-h-[32dvh] snap-end flex-col items-center justify-center border-t border-zinc-800/60 bg-zinc-950 px-6 pt-16 pb-[calc(4rem+env(safe-area-inset-bottom,0px))] text-center">
+        <footer className="flex min-h-[32dvh] snap-end flex-col items-center justify-center border-t border-zinc-800/60 bg-zinc-950 px-6 pt-16 pb-[calc(12rem+env(safe-area-inset-bottom,0px))] text-center">
           <p className="text-sm font-medium text-zinc-500">
             タイムラインはここまで
           </p>
@@ -1369,7 +1465,7 @@ export default function Timeline({
 
       {/* Reaction rail follows the active (debounced) post */}
       {activePost ? (
-        <div className="pointer-events-auto fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] left-1/2 z-20 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
+        <div className="pointer-events-auto fixed bottom-[calc(env(safe-area-inset-bottom,0px)+3.5rem+0.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-row gap-3 sm:bottom-auto sm:left-auto sm:right-4 sm:top-1/2 sm:translate-x-0 sm:-translate-y-1/2 sm:flex-col sm:gap-4">
           {(Object.keys(instrumentIcons) as InstrumentType[]).map(
             (instrument) => {
               const Icon = instrumentIcons[instrument];

@@ -4,14 +4,20 @@ import LockScreen from './components/LockScreen';
 import Timeline from './components/Timeline';
 import Profile from './components/Profile';
 import CreatePostModal from './components/CreatePostModal';
+import Notifications from './components/Notifications';
 import Login from './components/Login';
 import InitialProfileSetup from './components/InitialProfileSetup';
 import { supabase } from './lib/supabase';
-import { fetchTodaysPostCountForUser, isProfileUuid } from './lib/api';
+import {
+  fetchHasUnreadNotifications,
+  fetchTodaysPostCountForUser,
+  isProfileUuid,
+} from './lib/api';
 import { DAILY_POST_LIMIT } from './constants/posting';
 import type { Session } from '@supabase/supabase-js';
+import { RotateCw } from 'lucide-react';
 
-type Screen = 'lock' | 'timeline' | 'profile';
+type Screen = 'lock' | 'timeline' | 'profile' | 'notifications';
 
 function formatProfilePath(slug: string): string {
   const s = slug.trim();
@@ -92,10 +98,31 @@ function App() {
   const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
   const [todaysPostCount, setTodaysPostCount] = useState(0);
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+  const [timelineJumpPostId, setTimelineJumpPostId] = useState<string | null>(
+    null,
+  );
   /** Logged-in user must have a non-empty display_name before using the app. */
   const [profileGate, setProfileGate] = useState<
     'unknown' | 'ok' | 'setup'
   >('unknown');
+  const [landscapeMobile, setLandscapeMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(orientation: landscape)');
+    const isMobileSize = () => window.innerWidth <= 900;
+    const recompute = () => {
+      setLandscapeMobile(mq.matches && isMobileSize());
+    };
+    recompute();
+    mq.addEventListener?.('change', recompute);
+    window.addEventListener('resize', recompute);
+    return () => {
+      mq.removeEventListener?.('change', recompute);
+      window.removeEventListener('resize', recompute);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -166,6 +193,59 @@ function App() {
   }, [session?.user?.id, passcodeOk, refreshPostingState]);
 
   const userId = session?.user?.id ?? null;
+
+  const refreshUnreadNotifications = useCallback(async () => {
+    if (!userId || profileGate !== 'ok') return;
+    const unread = await fetchHasUnreadNotifications(userId);
+    setHasUnreadNotifications(unread);
+  }, [userId, profileGate]);
+
+  useEffect(() => {
+    if (!userId || profileGate !== 'ok') return;
+    let alive = true;
+    void (async () => {
+      const unread = await fetchHasUnreadNotifications(userId);
+      if (alive) setHasUnreadNotifications(unread);
+    })();
+    const id = window.setInterval(() => {
+      void refreshUnreadNotifications();
+    }, 45_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [userId, profileGate, refreshUnreadNotifications]);
+
+  useEffect(() => {
+    if (currentScreen !== 'timeline') return;
+    void refreshUnreadNotifications();
+  }, [currentScreen, refreshUnreadNotifications]);
+
+  const handleConsumedTimelineJump = useCallback(() => {
+    setTimelineJumpPostId(null);
+  }, []);
+
+  const handleUnreadNotificationsCleared = useCallback(() => {
+    setHasUnreadNotifications(false);
+  }, []);
+
+  const handleOpenNotifications = useCallback(() => {
+    setCurrentScreen('notifications');
+  }, []);
+
+  const handleBackFromNotifications = useCallback(() => {
+    setCurrentScreen('timeline');
+  }, []);
+
+  const handleNotificationOpenPost = useCallback((postId: string) => {
+    const id = postId.trim();
+    if (!id) return;
+    setTimelineJumpPostId(id);
+    setCurrentScreen('timeline');
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', '/');
+    }
+  }, []);
 
   /** One-time setup: `public.users.display_name` must be set (not a separate `profiles` table in this app). */
   useEffect(() => {
@@ -290,6 +370,27 @@ function App() {
     );
   }
 
+  if (landscapeMobile) {
+    return (
+      <div className="fixed inset-0 z-[999] flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-6 text-zinc-50">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/60">
+            <RotateCw className="h-7 w-7 text-zinc-300" strokeWidth={2} />
+          </div>
+          <p className="text-base font-semibold text-zinc-100">
+            縦画面でご利用ください
+          </p>
+          <p className="text-sm leading-relaxed text-zinc-500">
+            端末を回転して、縦向きでご利用ください。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const showTimelineShell =
+    currentScreen === 'timeline' || currentScreen === 'notifications';
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
       <AnimatePresence mode="wait">
@@ -302,12 +403,16 @@ function App() {
             slotsLimit={DAILY_POST_LIMIT}
           />
         )}
-        {currentScreen === 'timeline' && (
+        {showTimelineShell && (
           <Timeline
             key="timeline"
             onViewProfile={handleViewProfile}
             onShareSong={() => setCreatePostModalOpen(true)}
             timelineRefreshTrigger={timelineRefreshTrigger}
+            onOpenNotifications={handleOpenNotifications}
+            hasUnreadNotifications={hasUnreadNotifications}
+            openReplyForPostId={timelineJumpPostId}
+            onConsumedOpenReplyForPostId={handleConsumedTimelineJump}
           />
         )}
         {currentScreen === 'profile' && selectedProfileSlug && (
@@ -319,6 +424,15 @@ function App() {
           />
         )}
       </AnimatePresence>
+
+      {currentScreen === 'notifications' && profileGate === 'ok' ? (
+        <Notifications
+          userId={userId}
+          onBack={handleBackFromNotifications}
+          onOpenPost={handleNotificationOpenPost}
+          onUnreadCleared={handleUnreadNotificationsCleared}
+        />
+      ) : null}
 
       <CreatePostModal
         isOpen={createPostModalOpen}

@@ -99,6 +99,32 @@ export interface DbReplyLike {
   created_at: string;
 }
 
+/** Stored in `notifications.type`. */
+export type NotificationKind = 'reaction' | 'reply' | 'like';
+
+export interface DbNotification {
+  id: string;
+  user_id: string;
+  actor_id: string;
+  type: NotificationKind;
+  post_id: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+/** Notification row for in-app lists (recipient-scoped). */
+export interface AppNotification {
+  id: string;
+  actorId: string;
+  type: NotificationKind;
+  postId: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+/** Alias for UI/api usage (table: `notifications`). */
+export type Notification = AppNotification;
+
 export interface DbReaction {
   id: string;
   post_id: string;

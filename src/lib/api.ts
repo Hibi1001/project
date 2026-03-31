@@ -7,8 +7,99 @@ import type {
   DbPost,
   DbReaction,
   DbUser,
+  NotificationKind,
+  AppNotification,
 } from '../types';
 import { POST_CAPTION_MAX_LENGTH, POST_REPLY_MAX_LENGTH } from '../types';
+
+async function insertNotificationForRecipient(params: {
+  recipientUserId: string;
+  actorId: string;
+  type: NotificationKind;
+  postId: string;
+}): Promise<void> {
+  if (params.recipientUserId === params.actorId) return;
+  const { error } = await supabase.from('notifications').insert({
+    user_id: params.recipientUserId,
+    actor_id: params.actorId,
+    type: params.type,
+    post_id: params.postId,
+    is_read: false,
+  });
+  if (error) console.error('insertNotificationForRecipient', error);
+}
+
+/** After a successful instrument reaction insert (client already enforces auth). */
+export async function notifyReactionToPost(
+  postId: string,
+  actorId: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('posts')
+    .select('user_id')
+    .eq('id', postId)
+    .maybeSingle();
+  if (error || !data) return;
+  await insertNotificationForRecipient({
+    recipientUserId: (data as { user_id: string }).user_id,
+    actorId,
+    type: 'reaction',
+    postId,
+  });
+}
+
+export async function fetchHasUnreadNotifications(
+  userId: string,
+): Promise<boolean> {
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('is_read', false);
+
+  if (error) {
+    console.error('fetchHasUnreadNotifications', error);
+    return false;
+  }
+  return (count ?? 0) > 0;
+}
+
+export async function markAllNotificationsReadForUser(
+  userId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true })
+    .eq('user_id', userId)
+    .eq('is_read', false);
+
+  if (error) console.error('markAllNotificationsReadForUser', error);
+}
+
+export async function fetchNotificationsForUser(
+  userId: string,
+): Promise<AppNotification[]> {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('id, actor_id, type, post_id, is_read, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error) {
+    console.error('fetchNotificationsForUser', error);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    id: (row as { id: string }).id,
+    actorId: (row as { actor_id: string }).actor_id,
+    type: (row as { type: NotificationKind }).type,
+    postId: (row as { post_id: string }).post_id,
+    isRead: Boolean((row as { is_read: boolean }).is_read),
+    createdAt: (row as { created_at: string }).created_at,
+  }));
+}
 
 type DbInstrument = InstrumentType;
 
@@ -733,6 +824,40 @@ export async function insertPostReply(
     console.error('Error inserting reply', error);
     throw new Error(error.message);
   }
+
+  try {
+    if (parentId) {
+      const { data: parentReply, error: pErr } = await supabase
+        .from('post_replies')
+        .select('user_id')
+        .eq('id', parentId)
+        .maybeSingle();
+      if (!pErr && parentReply) {
+        await insertNotificationForRecipient({
+          recipientUserId: (parentReply as { user_id: string }).user_id,
+          actorId: userId,
+          type: 'reply',
+          postId,
+        });
+      }
+    } else {
+      const { data: postRow, error: postErr } = await supabase
+        .from('posts')
+        .select('user_id')
+        .eq('id', postId)
+        .maybeSingle();
+      if (!postErr && postRow) {
+        await insertNotificationForRecipient({
+          recipientUserId: (postRow as { user_id: string }).user_id,
+          actorId: userId,
+          type: 'reply',
+          postId,
+        });
+      }
+    }
+  } catch (e) {
+    console.error('insertPostReply notification', e);
+  }
 }
 
 export async function toggleReplyLike(
@@ -771,6 +896,25 @@ export async function toggleReplyLike(
     console.error('Error inserting reply like', insErr);
     throw new Error(insErr.message);
   }
+
+  try {
+    const { data: replyRow, error: rErr } = await supabase
+      .from('post_replies')
+      .select('user_id, post_id')
+      .eq('id', replyId)
+      .maybeSingle();
+    if (!rErr && replyRow) {
+      await insertNotificationForRecipient({
+        recipientUserId: (replyRow as { user_id: string }).user_id,
+        actorId: userId,
+        type: 'like',
+        postId: (replyRow as { post_id: string }).post_id,
+      });
+    }
+  } catch (e) {
+    console.error('toggleReplyLike notification', e);
+  }
+
   return { liked: true };
 }
 
