@@ -162,6 +162,7 @@ export default function Timeline({
   );
   const autoplayDelayRef = useRef<number | null>(null);
   const lastAutoAdvanceFromPostIdRef = useRef<string | null>(null);
+  const suppressIoUntilRef = useRef<number>(0);
   const [userReactionSet, setUserReactionSet] = useState<
     Set<InstrumentType>
   >(new Set());
@@ -239,13 +240,20 @@ export default function Timeline({
 
   const scheduleActiveFromScroll = useCallback((postId: string) => {
     setIoPostId(postId);
+    const prevActive = activePostIdRef.current;
     if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
     scrollDebounceRef.current = setTimeout(() => {
       scrollDebounceRef.current = null;
+      // If IO fires due to rerenders (e.g. reaction count change) but the active post
+      // hasn't actually changed, do not interrupt playback.
+      if (activePostIdRef.current === postId) return;
+
       // Prevent a one-frame “carryover” play on src change:
-      // we only want the delayed autoplay effect to start playback.
-      setIsPlaying(false);
-      setPreviewProgress(0);
+      // we only want the delayed autoplay effect to start playback for a *new* post.
+      if (prevActive !== postId) {
+        setIsPlaying(false);
+        setPreviewProgress(0);
+      }
       setActivePostId(postId);
     }, 280);
   }, []);
@@ -333,6 +341,8 @@ export default function Timeline({
 
   const toggleReaction = (postId: string, instrument: InstrumentType) => {
     if (!authUserId) return;
+    // Prevent IO jitter (caused by rerender/layout shifts) from flipping active post and pausing audio.
+    suppressIoUntilRef.current = Date.now() + 900;
 
     const alreadyReacted = userReactionSet.has(instrument);
 
@@ -721,6 +731,13 @@ export default function Timeline({
         if (!(bestEl instanceof HTMLElement)) return;
         const itemType = bestEl.dataset.itemType as 'song' | 'band' | undefined;
         const postId = bestEl.dataset.postId ?? null;
+        // While reacting, suppress IO-driven focus flips caused by tiny layout shifts.
+        // This prevents activePostId churn that would pause audio mid-play.
+        if (Date.now() < suppressIoUntilRef.current) {
+          const cur = activePostIdRef.current;
+          if (cur && postId && postId !== cur) return;
+        }
+
         if (itemType === 'band') {
           focusTimelineFromScroll('band', null);
         } else if (itemType === 'song' && postId) {
