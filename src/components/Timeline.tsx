@@ -1098,6 +1098,7 @@ export default function Timeline({
         style={{ scrollSnapType: 'y mandatory' }}
       >
         {feedItems.map((item, feedIndex) => {
+          const isFirstFeedItem = feedIndex === 0;
           if (item.itemType === 'band') {
             const ownerKey = item.userId || item.owner_id;
             const owner = ownerKey ? usersById[ownerKey] : undefined;
@@ -1115,7 +1116,9 @@ export default function Timeline({
                 data-timeline-post
                 data-item-type="band"
                 data-band-id={item.id}
-                className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 pt-16"
+                className={`relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 ${
+                  isFirstFeedItem ? 'pt-[80px]' : 'pt-16'
+                }`}
                 style={{ scrollSnapAlign: 'start' }}
                 aria-label="バンド募集"
                 {...timelineSlideEnterMotion}
@@ -1305,7 +1308,9 @@ export default function Timeline({
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className="relative isolate box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start overflow-hidden px-6 pb-48 pt-10"
+              className={`relative isolate box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start overflow-hidden px-6 pb-48 ${
+                isFirstFeedItem ? 'pt-[80px]' : 'pt-10'
+              }`}
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
