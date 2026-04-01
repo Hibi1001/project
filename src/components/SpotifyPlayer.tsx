@@ -19,6 +19,8 @@ export interface SpotifyPlayerProps {
 export type SpotifyPlayerHandle = {
   /** load() → canplay → unmute → play() in one chain (call from click after flushSync). */
   loadAndPlayFromGesture: () => Promise<void>;
+  /** Immediately pause + reset playback position. */
+  pauseAndReset: () => void;
 };
 
 function effectiveDurationSeconds(a: HTMLAudioElement): number {
@@ -38,6 +40,14 @@ function effectiveDurationSeconds(a: HTMLAudioElement): number {
 function playAudible(a: HTMLAudioElement): Promise<void> {
   a.muted = false;
   a.volume = 1.0;
+  // Ensure strict single playback: pause any other <audio> elements on the page.
+  try {
+    document.querySelectorAll('audio').forEach((el) => {
+      if (el !== a) el.pause();
+    });
+  } catch {
+    // ignore
+  }
   return a.play().catch((err) => {
     console.warn('Audio play blocked or failed:', err);
     throw err;
@@ -161,6 +171,19 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
         playingRef.current = true;
         await loadThenMaybePlay(a, url, true);
       },
+      pauseAndReset: () => {
+        const a = audioRef.current;
+        if (!a) return;
+        stopRaf();
+        a.pause();
+        try {
+          a.currentTime = 0;
+        } catch {
+          // iOS can throw if not seekable yet; best-effort.
+        }
+        setPlayingRef.current(false);
+        onProgressRef.current(0);
+      },
     }));
 
     useLayoutEffect(() => {
@@ -242,6 +265,31 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
         a.removeEventListener('ended', onEnded);
       };
     }, [src, updateProgress, stopRaf]);
+
+    useEffect(() => {
+      const a = audioRef.current;
+      if (!a) return;
+
+      const pauseForBackground = () => {
+        if (!document.hidden) return;
+        stopRaf();
+        a.pause();
+        try {
+          a.currentTime = 0;
+        } catch {
+          // ignore
+        }
+        setPlayingRef.current(false);
+        onProgressRef.current(0);
+      };
+
+      document.addEventListener('visibilitychange', pauseForBackground);
+      window.addEventListener('pagehide', pauseForBackground);
+      return () => {
+        document.removeEventListener('visibilitychange', pauseForBackground);
+        window.removeEventListener('pagehide', pauseForBackground);
+      };
+    }, [stopRaf]);
 
     return (
       <audio

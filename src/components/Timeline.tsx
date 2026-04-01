@@ -199,6 +199,11 @@ export default function Timeline({
   activePostIdRef.current = activePostId;
 
   const scheduleActiveFromScroll = useCallback((postId: string) => {
+    // Strict single playback: as soon as IO suggests a *different* post, stop current audio
+    // immediately (don't wait for the scroll debounce to complete).
+    if (activePostIdRef.current && activePostIdRef.current !== postId) {
+      spotifyPlayerRef.current?.pauseAndReset();
+    }
     setIoPostId(postId);
     const prevActive = activePostIdRef.current;
     if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
@@ -227,6 +232,7 @@ export default function Timeline({
         }
         setIoPostId(null);
         setActivePostId(null);
+        spotifyPlayerRef.current?.pauseAndReset();
         setIsPlaying(false);
         setPreviewProgress(0);
         return;
@@ -240,6 +246,9 @@ export default function Timeline({
     if (scrollDebounceRef.current) {
       clearTimeout(scrollDebounceRef.current);
       scrollDebounceRef.current = null;
+    }
+    if (activePostIdRef.current && activePostIdRef.current !== postId) {
+      spotifyPlayerRef.current?.pauseAndReset();
     }
     skipPlayingResetRef.current = true;
     setIoPostId(postId);
@@ -1003,7 +1012,7 @@ export default function Timeline({
 
       <div
         ref={scrollRef}
-        className="fixed left-0 right-0 top-0 box-border h-[100dvh] w-full snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain scroll-smooth touch-pan-y bg-zinc-950 scroll-pb-[calc(16rem+env(safe-area-inset-bottom,0px))] scroll-pt-[env(safe-area-inset-top,0px)] [-webkit-overflow-scrolling:touch]"
+        className="fixed left-0 right-0 top-0 box-border h-[100dvh] w-full snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y bg-zinc-950 scroll-pb-[calc(16rem+env(safe-area-inset-bottom,0px))] scroll-pt-[env(safe-area-inset-top,0px)] [-webkit-overflow-scrolling:touch]"
         style={{ scrollSnapType: 'y mandatory' }}
         onTouchStart={(e) => {
           if (pullRefreshing || isLoading) return;
@@ -1090,7 +1099,7 @@ export default function Timeline({
                 data-timeline-post
                 data-item-type="band"
                 data-band-id={item.id}
-                className="relative box-border flex min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 pt-16"
+                className="relative box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start gap-6 px-6 pb-48 pt-16"
                 style={{ scrollSnapAlign: 'start' }}
                 aria-label="バンド募集"
                 {...timelineSlideEnterMotion}
