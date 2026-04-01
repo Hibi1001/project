@@ -9,6 +9,8 @@ import BandBoard from './components/BandBoard';
 import Login from './components/Login';
 import InitialProfileSetup from './components/InitialProfileSetup';
 import { supabase } from './lib/supabase';
+import { createBandProjectWithRoles } from './lib/profileBandRecruitment';
+import type { InstrumentType } from './types';
 import {
   fetchHasUnreadNotifications,
   fetchTimelineBandProjects,
@@ -101,6 +103,14 @@ function App() {
     null,
   );
   const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
+  const [createBandModalOpen, setCreateBandModalOpen] = useState(false);
+  const [createBandName, setCreateBandName] = useState('');
+  const [createBandDesc, setCreateBandDesc] = useState('');
+  const [createBandPicked, setCreateBandPicked] = useState<Set<InstrumentType>>(
+    new Set(),
+  );
+  const [createBandSubmitting, setCreateBandSubmitting] = useState(false);
+  const [createBandError, setCreateBandError] = useState<string | null>(null);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [todaysPostCount, setTodaysPostCount] = useState(0);
@@ -400,6 +410,47 @@ function App() {
     window.setTimeout(() => setRefreshing(false), 1800);
   }, []);
 
+  const handleOpenCreateBandRecruitment = useCallback(() => {
+    setHasUserGesture(true);
+    setCreateBandError(null);
+    setCreateBandName('');
+    setCreateBandDesc('');
+    setCreateBandPicked(new Set());
+    setCreateBandModalOpen(true);
+  }, []);
+
+  const toggleCreateBandPick = (i: InstrumentType) => {
+    setCreateBandPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+
+  const submitCreateBandRecruitment = useCallback(async () => {
+    if (!userId) return;
+    setCreateBandSubmitting(true);
+    setCreateBandError(null);
+    try {
+      const { error } = await createBandProjectWithRoles({
+        ownerId: userId,
+        name: createBandName,
+        description: createBandDesc,
+        instruments: [...createBandPicked],
+      });
+      if (error) {
+        setCreateBandError(error);
+        return;
+      }
+      setCreateBandModalOpen(false);
+      // Nudge feeds to pick up the new recruitment immediately.
+      setTimelineRefreshTrigger((t) => t + 1);
+    } finally {
+      setCreateBandSubmitting(false);
+    }
+  }, [userId, createBandName, createBandDesc, createBandPicked]);
+
   const handleViewProfile = (profileSlug: string) => {
     const slug = profileSlug.trim();
     if (!slug) return;
@@ -538,7 +589,7 @@ function App() {
               hasUnreadNotifications={hasUnreadNotifications}
               onOpenNotifications={handleOpenNotifications}
               onOpenProfile={() => handleViewProfile(userId)}
-              onShareSong={() => setCreatePostModalOpen(true)}
+              onShareSong={handleOpenCreateBandRecruitment}
               onOpenTimeline={handleBackFromBoard}
               onViewProfile={handleViewProfile}
             />
@@ -573,6 +624,94 @@ function App() {
         onSubmitSuccess={handleCreatePostSuccess}
         userId={userId}
       />
+
+      {createBandModalOpen ? (
+        <div className="fixed inset-0 z-[220] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center">
+          <div
+            role="dialog"
+            aria-modal
+            aria-label="バンド募集を作成"
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+              <div className="text-sm font-semibold text-zinc-100">
+                バンド募集を作成
+              </div>
+              <button
+                type="button"
+                disabled={createBandSubmitting}
+                onClick={() => setCreateBandModalOpen(false)}
+                className="rounded-full px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-60"
+              >
+                閉じる
+              </button>
+            </div>
+            <div className="space-y-3 p-4">
+              {createBandError ? (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                  {createBandError}
+                </div>
+              ) : null}
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-zinc-400">
+                  バンド名
+                </label>
+                <input
+                  value={createBandName}
+                  onChange={(e) => setCreateBandName(e.target.value)}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/40"
+                  placeholder="例：メロパン研究会"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-zinc-400">
+                  説明（任意）
+                </label>
+                <textarea
+                  value={createBandDesc}
+                  onChange={(e) => setCreateBandDesc(e.target.value)}
+                  className="min-h-[88px] w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/40"
+                  placeholder="やりたい曲、活動頻度など"
+                />
+              </div>
+              <div>
+                <div className="mb-2 text-xs font-semibold text-zinc-400">
+                  募集パート
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(['vocal', 'guitar', 'bass', 'drum', 'keyboard'] as InstrumentType[]).map(
+                    (i) => {
+                      const on = createBandPicked.has(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => toggleCreateBandPick(i)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                            on
+                              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                              : 'border-zinc-800 bg-zinc-950/30 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {i}
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={createBandSubmitting}
+                onClick={() => void submitCreateBandRecruitment()}
+                className="mt-1 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+              >
+                {createBandSubmitting ? '作成中…' : '作成する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {userId && profileGate === 'unknown' ? (
         <div className="fixed inset-0 z-[199] flex items-center justify-center bg-zinc-950/90 backdrop-blur-sm">

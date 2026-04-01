@@ -162,6 +162,10 @@ export default function Timeline({
   );
   const [bandDeleteBusyId, setBandDeleteBusyId] = useState<string | null>(null);
   const [bandRoleBusyId, setBandRoleBusyId] = useState<string | null>(null);
+  const [bandApplicantsByRoleId, setBandApplicantsByRoleId] = useState<
+    Record<string, { id: string; name: string; avatar: string }[]>
+  >({});
+  const bandRoleIdsRef = useRef<string[]>([]);
   const feedBootstrapConsumedRef = useRef(false);
   /** Run `restorePostId` scroll at most once each time Timeline becomes foreground. */
   const restoreScrollConsumedRef = useRef(false);
@@ -555,6 +559,63 @@ export default function Timeline({
   useEffect(() => {
     usersByIdRef.current = usersById;
   }, [usersById]);
+
+  const reloadBandApplicants = useCallback(async () => {
+    const roleIds = bandRoleIdsRef.current;
+    if (!roleIds || roleIds.length === 0) {
+      setBandApplicantsByRoleId({});
+      return;
+    }
+    const { data, error } = await supabase
+      .from('band_role_applicants')
+      .select('role_id, user_id, users(id, display_name, avatar_url)')
+      .in('role_id', roleIds);
+    if (error) {
+      console.error('[Timeline] band_role_applicants fetch', error);
+      return;
+    }
+    const map: Record<string, { id: string; name: string; avatar: string }[]> =
+      {};
+    for (const rowAny of (data ?? []) as any[]) {
+      const roleId = String(rowAny.role_id || '').trim();
+      const userId = String(rowAny.user_id || '').trim();
+      if (!roleId || !userId) continue;
+      const u = rowAny.users as
+        | { id: string; display_name: string | null; avatar_url: string | null }
+        | null
+        | undefined;
+      const list = map[roleId] ?? [];
+      list.push({
+        id: userId,
+        name: (u?.display_name ?? '').trim() || 'ユーザー',
+        avatar: u?.avatar_url ?? '',
+      });
+      map[roleId] = list;
+    }
+    setBandApplicantsByRoleId(map);
+  }, []);
+
+  useEffect(() => {
+    const roleIds = feedItems
+      .filter((i): i is TimelineBandProjectFeedItem => i.itemType === 'band')
+      .flatMap((b) => b.roles.map((r) => r.id));
+    bandRoleIdsRef.current = roleIds;
+    void reloadBandApplicants();
+  }, [feedItems, reloadBandApplicants]);
+
+  useEffect(() => {
+    const ch = supabase
+      .channel('timeline-band-applicants')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'band_role_applicants' },
+        () => void reloadBandApplicants(),
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(ch);
+    };
+  }, [reloadBandApplicants]);
 
   const neededUserIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1023,56 +1084,44 @@ export default function Timeline({
       return;
     }
     if (!authUserId) return;
-    const filled = Boolean(role.applicant_id);
-    const isMine = role.applicant_id === authUserId;
-    if (filled && !isMine) return;
+    const current = bandApplicantsByRoleId[role.id] ?? [];
+    const isMine = current.some((a) => a.id === authUserId);
 
     setBandRoleBusyId(role.id);
     try {
-      if (!filled) {
+      if (!isMine) {
         const { error } = await supabase
-          .from('band_roles')
-          .update({ applicant_id: authUserId })
-          .eq('id', role.id)
-          .is('applicant_id', null);
+          .from('band_role_applicants')
+          .insert({ role_id: role.id, user_id: authUserId });
         if (error) {
           console.error(error);
+          window.alert(error.message ?? '応募に失敗しました。');
           return;
         }
-        setFeedItems((prev) =>
-          prev.map((fi): FeedItem => {
-            if (fi.itemType !== 'band' || fi.id !== bandItem.id) return fi;
-            return {
-              ...fi,
-              roles: fi.roles.map((r) =>
-                r.id === role.id ? { ...r, applicant_id: authUserId } : r,
-              ),
-            };
-          }),
-        );
-        const me = await fetchUserById(authUserId);
-        if (me) setUsersById((prev) => ({ ...prev, [me.id]: me }));
+        setBandApplicantsByRoleId((prev) => {
+          const cur = prev[role.id] ?? [];
+          if (cur.some((x) => x.id === authUserId)) return prev;
+          return {
+            ...prev,
+            [role.id]: [{ id: authUserId, name: 'あなた', avatar: '' }, ...cur],
+          };
+        });
       } else {
         const { error } = await supabase
-          .from('band_roles')
-          .update({ applicant_id: null })
-          .eq('id', role.id)
-          .eq('applicant_id', authUserId);
+          .from('band_role_applicants')
+          .delete()
+          .eq('role_id', role.id)
+          .eq('user_id', authUserId);
         if (error) {
           console.error(error);
+          window.alert(error.message ?? '取り消しに失敗しました。');
           return;
         }
-        setFeedItems((prev) =>
-          prev.map((fi): FeedItem => {
-            if (fi.itemType !== 'band' || fi.id !== bandItem.id) return fi;
-            return {
-              ...fi,
-              roles: fi.roles.map((r) =>
-                r.id === role.id ? { ...r, applicant_id: null } : r,
-              ),
-            };
-          }),
-        );
+        setBandApplicantsByRoleId((prev) => {
+          const cur = prev[role.id];
+          if (!cur) return prev;
+          return { ...prev, [role.id]: cur.filter((x) => x.id !== authUserId) };
+        });
       }
     } finally {
       setBandRoleBusyId(null);
@@ -1164,19 +1213,15 @@ export default function Timeline({
                         {(item.roles ?? []).map((r) => {
                           const Inst =
                             instrumentIcons[r.instrument_type] ?? Music2;
-                          const filled = Boolean(r.applicant_id);
+                          const roleApplicants =
+                            bandApplicantsByRoleId[r.id] ?? [];
                           const isMine =
                             Boolean(authUserId) &&
-                            r.applicant_id === authUserId;
+                            roleApplicants.some((a) => a.id === authUserId);
                           const isOwner =
                             Boolean(authUserId) &&
                             item.owner_id === authUserId;
-                          const otherFilled = filled && !isMine;
-                          const disabled =
-                            bandRoleBusyId === r.id || otherFilled;
-                          const applicant = r.applicant_id
-                            ? usersById[r.applicant_id]
-                            : undefined;
+                          const disabled = bandRoleBusyId === r.id || isOwner;
                           return (
                             <button
                               key={r.id}
@@ -1186,60 +1231,50 @@ export default function Timeline({
                                 void handleBandRoleInTimeline(item, r, e)
                               }
                               className={`group relative flex min-w-[4.5rem] flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 transition-all ${
-                                otherFilled
-                                  ? 'cursor-default border-zinc-600/50 bg-zinc-800/80'
-                                  : isOwner
-                                    ? 'cursor-pointer border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-90'
-                                    : filled && isMine
-                                      ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
-                                      : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
+                                isOwner
+                                  ? 'cursor-default border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-90'
+                                  : isMine
+                                    ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
+                                    : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
                               } disabled:opacity-50`}
                               title={r.instrument_type}
                             >
                               <div
                                 className={`relative flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-xl bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50 ${
-                                  filled && applicant ? 'ring-emerald-500/25' : ''
+                                  roleApplicants.length > 0 ? 'ring-emerald-500/25' : ''
                                 }`}
                                 title={
-                                  filled && applicant
-                                    ? applicant.name
-                                    : r.instrument_type
+                                  roleApplicants[0]?.name ?? r.instrument_type
                                 }
                               >
-                                {filled && applicant ? (
-                                  <>
-                                    <img
-                                      src={
-                                        applicant.avatar ||
-                                        'https://placehold.co/64x64?text=U'
-                                      }
-                                      alt=""
-                                      className="h-8 w-8 rounded-full border-2 border-zinc-900 object-cover ring-2 ring-emerald-500/35"
-                                    />
-                                    <Inst
-                                      className="absolute bottom-0.5 right-0.5 h-4 w-4 text-emerald-400/95 drop-shadow-md"
-                                      aria-hidden
-                                    />
-                                  </>
-                                ) : (
-                                  <Inst
-                                    className={`h-6 w-6 ${
-                                      otherFilled
-                                        ? 'text-zinc-500'
+                                <Inst
+                                  className={`h-6 w-6 ${
+                                    isOwner
+                                      ? 'text-zinc-500'
+                                      : isMine
+                                        ? 'text-emerald-400/95'
                                         : 'text-amber-400/90 group-hover:text-amber-300'
-                                    }`}
-                                  />
-                                )}
+                                  }`}
+                                />
                               </div>
-                              {filled && applicant ? (
-                                <span className="max-w-[5.5rem] truncate text-center text-[10px] font-medium text-zinc-300">
-                                  {applicant.name}
-                                </span>
-                              ) : (
-                                <span className="text-[10px] font-medium text-zinc-500">
-                                  {r.instrument_type}
-                                </span>
-                              )}
+                              <div className="flex -space-x-2">
+                                {roleApplicants.slice(0, 3).map((a) => (
+                                  <img
+                                    key={a.id}
+                                    src={
+                                      a.avatar?.trim()
+                                        ? a.avatar
+                                        : 'https://placehold.co/32x32/27272a/a1a1aa?text=?'
+                                    }
+                                    alt=""
+                                    className="h-5 w-5 rounded-full object-cover ring-2 ring-zinc-950"
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-[10px] font-medium text-zinc-500">
+                                {isOwner ? '募集中' : isMine ? '応募済み' : '応募'}
+                                {roleApplicants.length > 0 ? ` · ${roleApplicants.length}` : ''}
+                              </span>
                             </button>
                           );
                         })}
