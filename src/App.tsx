@@ -109,6 +109,8 @@ function App() {
   );
   const [lastActivePostId, setLastActivePostId] = useState<string | null>(null);
   const [hasUserGesture, setHasUserGesture] = useState(false);
+  // Used to ensure the check terminates (and for potential future UI gating).
+  const [gracePostCheckDone, setGracePostCheckDone] = useState(false);
   /** One level: where to return when closing Profile or Notifications (e.g. board → profile → back → board). */
   const [backDestination, setBackDestination] = useState<Screen>('timeline');
   /** Logged-in user must have a non-empty display_name before using the app. */
@@ -208,6 +210,45 @@ function App() {
   }, [session?.user?.id, passcodeOk, refreshPostingState]);
 
   const userId = session?.user?.id ?? null;
+
+  // 24-hour grace period: if the user has posted within the last 24 hours,
+  // bypass the LockScreen automatically (fast: fetch only the latest post).
+  useEffect(() => {
+    if (!userId || !passcodeOk || !authReady) return;
+    let cancelled = false;
+    setGracePostCheckDone(false);
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('posts')
+          .select('created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) {
+          console.error('[grace post check]', error);
+          return;
+        }
+        const createdAt = (data as { created_at?: string | null } | null)
+          ?.created_at;
+        if (!createdAt) return;
+        const t = new Date(createdAt).getTime();
+        if (!Number.isFinite(t)) return;
+        const within24h = Date.now() - t < 24 * 60 * 60 * 1000;
+        if (within24h && currentScreen === 'lock') {
+          setCurrentScreen('timeline');
+        }
+      } finally {
+        if (!cancelled) setGracePostCheckDone(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, passcodeOk, authReady, currentScreen]);
 
   const refreshUnreadNotifications = useCallback(async () => {
     if (!userId || profileGate !== 'ok') return;
