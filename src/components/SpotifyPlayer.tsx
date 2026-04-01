@@ -48,7 +48,11 @@ function playAudible(a: HTMLAudioElement): Promise<void> {
   } catch {
     // ignore
   }
-  return a.play().catch((err) => {
+  const playPromise = a.play();
+  if (playPromise === undefined) return Promise.resolve();
+  return playPromise.catch((err: any) => {
+    // Known race: play() interrupted by pause()/src swap.
+    if (err?.name === 'AbortError') return;
     console.warn('Audio play blocked or failed:', err);
     throw err;
   });

@@ -69,6 +69,14 @@ interface TimelineProps {
   hasUnreadNotifications?: boolean;
   /** Open band recruitment board (Navbar). */
   onOpenBoard?: () => void;
+  /** When false, Timeline should pause audio but keep state/scroll intact. */
+  isForeground?: boolean;
+  /** Set true after a confirmed user gesture (LockScreen tap, etc.). */
+  hasUserGesture?: boolean;
+  /** Restore scroll to a post when re-entering Timeline. */
+  restorePostId?: string | null;
+  /** Report which post is currently active (for restoration). */
+  onActivePostIdChange?: (postId: string | null) => void;
   /** Open reply sheet for this post after feed is ready (e.g. from notification tap). */
   openReplyForPostId?: string | null;
   onConsumedOpenReplyForPostId?: () => void;
@@ -90,6 +98,10 @@ export default function Timeline({
   onOpenNotifications,
   hasUnreadNotifications = false,
   onOpenBoard,
+  isForeground = true,
+  hasUserGesture: hasUserGestureProp = false,
+  restorePostId = null,
+  onActivePostIdChange,
   openReplyForPostId = null,
   onConsumedOpenReplyForPostId,
   authUserId: authUserIdProp,
@@ -153,6 +165,8 @@ export default function Timeline({
   const pullTriggeredRef = useRef(false);
   const [manualRefreshNonce, setManualRefreshNonce] = useState(0);
   const feedBootstrapConsumedRef = useRef(false);
+  /** Run `restorePostId` scroll at most once each time Timeline becomes foreground. */
+  const restoreScrollConsumedRef = useRef(false);
 
   // NOTE: instrument icon maps are module-scope constants.
 
@@ -203,6 +217,58 @@ export default function Timeline({
     : null;
 
   activePostIdRef.current = activePostId;
+
+  useEffect(() => {
+    onActivePostIdChange?.(activePostId);
+  }, [activePostId, onActivePostIdChange]);
+
+  useEffect(() => {
+    if (isForeground) return;
+    restoreScrollConsumedRef.current = false;
+    // Pause playback when covered by another view. SpotifyPlayer keeps `currentTime`
+    // when `playing` becomes false (same src) — no full reset.
+    setIsPlaying(false);
+  }, [isForeground]);
+
+  useEffect(() => {
+    if (!hasUserGestureProp) return;
+    setHasUserGesture(true);
+    setAutoplayBlockedPostId(null);
+  }, [hasUserGestureProp]);
+
+  useEffect(() => {
+    if (!isForeground) return;
+    const pid = restorePostId?.trim() ?? '';
+    if (!pid) return;
+    if (!posts.some((p) => p.id === pid)) return;
+    if (restoreScrollConsumedRef.current) return;
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const run = () => {
+      if (cancelled) return;
+      restoreScrollConsumedRef.current = true;
+      const el = scrollRef.current?.querySelector(`[data-post-id="${pid}"]`);
+      el?.scrollIntoView({ behavior: 'auto', block: 'center' });
+      setActivePostId(pid);
+      setIoPostId(pid);
+      prevStableActiveRef.current = pid;
+    };
+
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        timeoutId = window.setTimeout(run, 90);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf1);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [isForeground, restorePostId, posts]);
 
   const scheduleActiveFromScroll = useCallback((postId: string) => {
     // Strict single playback: as soon as IO suggests a *different* post, stop current audio
@@ -683,6 +749,12 @@ export default function Timeline({
       autoplayDelayRef.current = null;
     }
 
+    if (!isForeground) {
+      setIsPlaying(false);
+      setPreviewProgress(0);
+      return;
+    }
+
     if (!activePostId) {
       setAutoplayBlockedPostId(null);
       setIsPlaying(false);
@@ -692,6 +764,14 @@ export default function Timeline({
     const p = postsRef.current.find((x) => x.id === activePostId);
     if (!p?.previewUrl?.trim()) {
       setAutoplayBlockedPostId(null);
+      setIsPlaying(false);
+      setPreviewProgress(0);
+      return;
+    }
+
+    if (!hasUserGesture) {
+      // Autoplay is not allowed until the user has interacted with the page.
+      setAutoplayBlockedPostId(activePostId);
       setIsPlaying(false);
       setPreviewProgress(0);
       return;
@@ -721,7 +801,7 @@ export default function Timeline({
         autoplayDelayRef.current = null;
       }
     };
-  }, [activePostId]);
+  }, [activePostId, hasUserGesture, isForeground]);
 
   // If autoplay failed (SpotifyPlayer flips `playing` back to false), show a tap overlay.
   useEffect(() => {

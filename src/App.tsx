@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import LockScreen from './components/LockScreen';
 import Timeline from './components/Timeline';
 import Profile from './components/Profile';
@@ -107,6 +107,10 @@ function App() {
   const [timelineJumpPostId, setTimelineJumpPostId] = useState<string | null>(
     null,
   );
+  const [lastActivePostId, setLastActivePostId] = useState<string | null>(null);
+  const [hasUserGesture, setHasUserGesture] = useState(false);
+  /** One level: where to return when closing Profile or Notifications (e.g. board → profile → back → board). */
+  const [backDestination, setBackDestination] = useState<Screen>('timeline');
   /** Logged-in user must have a non-empty display_name before using the app. */
   const [profileGate, setProfileGate] = useState<
     'unknown' | 'ok' | 'setup'
@@ -188,6 +192,7 @@ function App() {
   }, []);
 
   const handleUnlock = () => {
+    setHasUserGesture(true);
     setCurrentScreen('timeline');
   };
 
@@ -240,17 +245,20 @@ function App() {
   }, []);
 
   const handleOpenNotifications = useCallback(() => {
+    setBackDestination(currentScreen);
     setCurrentScreen('notifications');
-  }, []);
+  }, [currentScreen]);
 
   const handleOpenBoard = useCallback(() => {
+    setBackDestination(currentScreen);
     setCurrentScreen('board');
-  }, []);
+  }, [currentScreen]);
 
   const handleBackFromNotifications = useCallback(() => {
-    setCurrentScreen('timeline');
-  }, []);
+    setCurrentScreen(backDestination);
+  }, [backDestination]);
 
+  /** Band board “back to feed” — always returns to the main timeline. */
   const handleBackFromBoard = useCallback(() => {
     setCurrentScreen('timeline');
   }, []);
@@ -330,13 +338,8 @@ function App() {
     void refreshPostingState(uid);
   }, [createPostModalOpen, session?.user?.id, refreshPostingState]);
 
-  /** 0 posts today → app LockScreen; 1+ posts today → Timeline (gate + “share another” live there). */
-  useEffect(() => {
-    if (currentScreen !== 'lock') return;
-    if (todaysPostCount >= 1) {
-      setCurrentScreen('timeline');
-    }
-  }, [todaysPostCount, currentScreen]);
+  // NOTE: We intentionally do NOT auto-transition off the LockScreen based on
+  // todaysPostCount. The title screen should remain stable until a user action.
 
   const handleCreatePostSuccess = useCallback(() => {
     setCreatePostModalOpen(false);
@@ -349,6 +352,7 @@ function App() {
   const handleViewProfile = (profileSlug: string) => {
     const slug = profileSlug.trim();
     if (!slug) return;
+    setBackDestination(currentScreen);
     setSelectedProfileSlug(slug);
     setCurrentScreen('profile');
     if (typeof window !== 'undefined') {
@@ -356,8 +360,8 @@ function App() {
     }
   };
 
-  const handleBackToTimeline = () => {
-    setCurrentScreen('timeline');
+  const handleBackFromProfile = () => {
+    setCurrentScreen(backDestination);
     setSelectedProfileSlug(null);
     if (typeof window !== 'undefined') {
       window.history.pushState(null, '', '/');
@@ -430,22 +434,32 @@ function App() {
     );
   }
 
-  const showTimelineShell =
-    currentScreen === 'timeline' || currentScreen === 'notifications';
+  const timelineVisible = currentScreen === 'timeline';
 
   return (
-    <div className="min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50">
-      <AnimatePresence mode="wait">
+    <div className="relative min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50">
+      <AnimatePresence mode="popLayout">
         {currentScreen === 'lock' && (
-          <LockScreen
-            key="lock"
-            onUnlock={() => setCreatePostModalOpen(true)}
-            onViewTimelineOnly={handleUnlock}
-            slotsUsed={todaysPostCount}
-            slotsLimit={DAILY_POST_LIMIT}
-          />
+          <motion.div key="lock" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <LockScreen
+              onUnlock={() => {
+                setHasUserGesture(true);
+                setCreatePostModalOpen(true);
+              }}
+              onViewTimelineOnly={handleUnlock}
+              slotsUsed={todaysPostCount}
+              slotsLimit={DAILY_POST_LIMIT}
+            />
+          </motion.div>
         )}
-        {showTimelineShell && (
+        <div
+          className={
+            timelineVisible
+              ? 'relative z-0 min-h-[100dvh]'
+              : 'hidden'
+          }
+          aria-hidden={!timelineVisible}
+        >
           <Timeline
             key="timeline"
             onViewProfile={handleViewProfile}
@@ -458,36 +472,46 @@ function App() {
             onConsumedOpenReplyForPostId={handleConsumedTimelineJump}
             authUserId={userId}
             feedBootstrap={timelineFeedBootstrap}
+            isForeground={timelineVisible}
+            restorePostId={lastActivePostId}
+            onActivePostIdChange={setLastActivePostId}
+            hasUserGesture={hasUserGesture}
           />
-        )}
+        </div>
         {currentScreen === 'board' && userId ? (
-          <BandBoard
-            authUserId={userId}
-            hasUnreadNotifications={hasUnreadNotifications}
-            onOpenNotifications={handleOpenNotifications}
-            onOpenProfile={() => handleViewProfile(userId)}
-            onShareSong={() => setCreatePostModalOpen(true)}
-            onOpenTimeline={handleBackFromBoard}
-            onViewProfile={handleViewProfile}
-          />
+          <div className="fixed inset-0 z-[100] flex min-h-0 flex-col bg-zinc-950">
+            <BandBoard
+              authUserId={userId}
+              hasUnreadNotifications={hasUnreadNotifications}
+              onOpenNotifications={handleOpenNotifications}
+              onOpenProfile={() => handleViewProfile(userId)}
+              onShareSong={() => setCreatePostModalOpen(true)}
+              onOpenTimeline={handleBackFromBoard}
+              onViewProfile={handleViewProfile}
+            />
+          </div>
         ) : null}
         {currentScreen === 'profile' && selectedProfileSlug && (
-          <Profile
-            key={selectedProfileSlug}
-            profileSlug={selectedProfileSlug}
-            onBack={handleBackToTimeline}
-            onProfileCanonicalSlugChange={handleProfileCanonicalSlugChange}
-          />
+          <div className="fixed inset-0 z-[100] flex min-h-0 flex-col overflow-hidden bg-zinc-950">
+            <Profile
+              key={selectedProfileSlug}
+              profileSlug={selectedProfileSlug}
+              onBack={handleBackFromProfile}
+              onProfileCanonicalSlugChange={handleProfileCanonicalSlugChange}
+            />
+          </div>
         )}
       </AnimatePresence>
 
       {currentScreen === 'notifications' && profileGate === 'ok' ? (
-        <Notifications
-          userId={userId}
-          onBack={handleBackFromNotifications}
-          onOpenPost={handleNotificationOpenPost}
-          onUnreadCleared={handleUnreadNotificationsCleared}
-        />
+        <div className="fixed inset-0 z-[110] flex min-h-0 flex-col bg-zinc-950">
+          <Notifications
+            userId={userId}
+            onBack={handleBackFromNotifications}
+            onOpenPost={handleNotificationOpenPost}
+            onUnreadCleared={handleUnreadNotificationsCleared}
+          />
+        </div>
       ) : null}
 
       <CreatePostModal
