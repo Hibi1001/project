@@ -102,6 +102,7 @@ function App() {
   );
   const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [todaysPostCount, setTodaysPostCount] = useState(0);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const [timelineJumpPostId, setTimelineJumpPostId] = useState<string | null>(
@@ -390,6 +391,15 @@ function App() {
     if (uid) void refreshPostingState(uid);
   }, [session?.user?.id, refreshPostingState]);
 
+  const handleRefresh = useCallback(() => {
+    setHasUserGesture(true);
+    setRefreshing(true);
+    setLastActivePostId(null);
+    setTimelineRefreshTrigger((t) => t + 1);
+    // Safety: release the button even if Timeline fails silently.
+    window.setTimeout(() => setRefreshing(false), 1800);
+  }, []);
+
   const handleViewProfile = (profileSlug: string) => {
     const slug = profileSlug.trim();
     if (!slug) return;
@@ -509,6 +519,8 @@ function App() {
             onOpenNotifications={handleOpenNotifications}
             hasUnreadNotifications={hasUnreadNotifications}
             onOpenBoard={handleOpenBoard}
+            onRefresh={handleRefresh}
+            refreshing={refreshing}
             openReplyForPostId={timelineJumpPostId}
             onConsumedOpenReplyForPostId={handleConsumedTimelineJump}
             authUserId={userId}

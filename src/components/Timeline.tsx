@@ -15,7 +15,6 @@ import {
   Drum,
   Piano,
   MessageCircle,
-  RefreshCw,
   Trash2,
 } from 'lucide-react';
 import { Post, User } from '../types';
@@ -69,6 +68,9 @@ interface TimelineProps {
   hasUnreadNotifications?: boolean;
   /** Open band recruitment board (Navbar). */
   onOpenBoard?: () => void;
+  /** Manual refresh (Navbar). */
+  onRefresh?: () => void;
+  refreshing?: boolean;
   /** When false, Timeline should pause audio but keep state/scroll intact. */
   isForeground?: boolean;
   /** Set true after a confirmed user gesture (LockScreen tap, etc.). */
@@ -98,6 +100,8 @@ export default function Timeline({
   onOpenNotifications,
   hasUnreadNotifications = false,
   onOpenBoard,
+  onRefresh,
+  refreshing = false,
   isForeground = true,
   hasUserGesture: hasUserGestureProp = false,
   restorePostId = null,
@@ -158,12 +162,6 @@ export default function Timeline({
   );
   const [bandDeleteBusyId, setBandDeleteBusyId] = useState<string | null>(null);
   const [bandRoleBusyId, setBandRoleBusyId] = useState<string | null>(null);
-  const [pullDistance, setPullDistance] = useState(0);
-  const [pullRefreshing, setPullRefreshing] = useState(false);
-  const pullStartYRef = useRef<number | null>(null);
-  const pullActiveRef = useRef(false);
-  const pullTriggeredRef = useRef(false);
-  const [manualRefreshNonce, setManualRefreshNonce] = useState(0);
   const feedBootstrapConsumedRef = useRef(false);
   /** Run `restorePostId` scroll at most once each time Timeline becomes foreground. */
   const restoreScrollConsumedRef = useRef(false);
@@ -192,6 +190,8 @@ export default function Timeline({
         hasUnreadNotifications={hasUnreadNotifications}
         onOpenBoard={onOpenBoard}
         onOpenTimeline={undefined}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
         active="timeline"
         onOpenPost={() => onShareSong()}
         postDisabled={false}
@@ -477,7 +477,7 @@ export default function Timeline({
   }, [openReplyForPostId, isLoading, feedItems, onConsumedOpenReplyForPostId]);
 
   useEffect(() => {
-    const applyMerged = (merged: FeedItem[]) => {
+    const applyMerged = (merged: FeedItem[], opts?: { scrollToTop?: boolean }) => {
       setFeedItems(merged);
       const firstSong = merged.find(
         (i): i is TimelineSongFeedItem => i.itemType === 'song',
@@ -486,6 +486,19 @@ export default function Timeline({
       setIoPostId(firstId);
       setActivePostId(firstId);
       prevStableActiveRef.current = firstId;
+      if (opts?.scrollToTop) {
+        requestAnimationFrame(() => {
+          const root = scrollRef.current;
+          if (!root) return;
+          if (firstId) {
+            root
+              .querySelector(`[data-post-id="${firstId}"]`)
+              ?.scrollIntoView({ behavior: 'auto', block: 'start' });
+          } else {
+            root.scrollTo({ top: 0, behavior: 'auto' });
+          }
+        });
+      }
       if (scrollDebounceRef.current) {
         clearTimeout(scrollDebounceRef.current);
         scrollDebounceRef.current = null;
@@ -501,17 +514,14 @@ export default function Timeline({
           fetchTimelineBandProjects(),
         ]);
         const merged = buildMergedTimelineFeed(songRows, bandRows);
-        applyMerged(merged);
+        applyMerged(merged, { scrollToTop: isRefresh && isForeground });
       } catch (e) {
         console.error('[Timeline] loadPostsFromNetwork', e);
-        applyMerged([]);
+        applyMerged([], { scrollToTop: false });
       }
     };
 
-    const isRefresh =
-      timelineRefreshTrigger > 0 ||
-      seedRefreshNonce > 0 ||
-      manualRefreshNonce > 0;
+    const isRefresh = timelineRefreshTrigger > 0 || seedRefreshNonce > 0;
 
     if (feedBootstrap !== undefined) {
       if (feedBootstrap.loading) {
@@ -524,7 +534,7 @@ export default function Timeline({
       }
       if (!feedBootstrapConsumedRef.current && feedBootstrap.items != null) {
         feedBootstrapConsumedRef.current = true;
-        applyMerged(feedBootstrap.items);
+        applyMerged(feedBootstrap.items, { scrollToTop: false });
         return;
       }
       // App should always pass `items` as an array when loading completes; if not, recover via network.
@@ -539,22 +549,8 @@ export default function Timeline({
   }, [
     timelineRefreshTrigger,
     seedRefreshNonce,
-    manualRefreshNonce,
     feedBootstrap,
   ]);
-
-  const triggerManualRefresh = useCallback(async () => {
-    if (pullRefreshing || isLoading) return;
-    setPullRefreshing(true);
-    try {
-      setManualRefreshNonce((n) => n + 1);
-      // Wait until next tick so loading UI can appear.
-      await new Promise((r) => setTimeout(r, 0));
-    } finally {
-      // Hide spinner shortly after refresh kicks off; the actual list loading uses `isLoading`.
-      setTimeout(() => setPullRefreshing(false), 300);
-    }
-  }, [pullRefreshing, isLoading]);
 
   useEffect(() => {
     usersByIdRef.current = usersById;
@@ -1100,73 +1096,7 @@ export default function Timeline({
         ref={scrollRef}
         className="fixed left-0 right-0 top-0 box-border h-[100dvh] w-full snap-y snap-mandatory overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y bg-zinc-950 scroll-pb-[calc(16rem+env(safe-area-inset-bottom,0px))] scroll-pt-[env(safe-area-inset-top,0px)] [-webkit-overflow-scrolling:touch]"
         style={{ scrollSnapType: 'y mandatory' }}
-        onTouchStart={(e) => {
-          if (pullRefreshing || isLoading) return;
-          if (e.touches.length !== 1) return;
-          const el = scrollRef.current;
-          if (!el) return;
-          if (el.scrollTop > 0) return;
-          pullStartYRef.current = e.touches[0].clientY;
-          pullActiveRef.current = true;
-          pullTriggeredRef.current = false;
-          setPullDistance(0);
-        }}
-        onTouchMove={(e) => {
-          if (!pullActiveRef.current) return;
-          if (pullRefreshing || isLoading) return;
-          const start = pullStartYRef.current;
-          if (start == null) return;
-          const dy = e.touches[0].clientY - start;
-          if (dy <= 0) {
-            setPullDistance(0);
-            return;
-          }
-          // Damp for a more natural feel.
-          const damped = Math.min(120, dy * 0.55);
-          setPullDistance(damped);
-          if (damped > 72) {
-            pullTriggeredRef.current = true;
-          }
-        }}
-        onTouchEnd={() => {
-          if (!pullActiveRef.current) return;
-          pullActiveRef.current = false;
-          pullStartYRef.current = null;
-          const shouldRefresh = pullTriggeredRef.current;
-          pullTriggeredRef.current = false;
-          setPullDistance(0);
-          if (shouldRefresh) {
-            void triggerManualRefresh();
-          }
-        }}
       >
-        <div
-          className="pointer-events-none sticky top-0 z-10 flex w-full justify-center"
-          aria-hidden
-          style={{
-            height: pullDistance > 0 || pullRefreshing ? Math.max(32, pullDistance) : 0,
-            transition:
-              pullDistance === 0 && !pullRefreshing ? 'height 180ms ease' : undefined,
-          }}
-        >
-          <div
-            className="mt-2 flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/90 px-3 py-1.5 text-xs text-zinc-400 backdrop-blur-md"
-            style={{
-              opacity: pullDistance > 0 || pullRefreshing ? 1 : 0,
-              transform: `translateY(${Math.min(12, pullDistance * 0.15)}px)`,
-              transition: 'opacity 150ms ease',
-            }}
-          >
-            <RefreshCw
-              className={`h-3.5 w-3.5 ${pullRefreshing || pullDistance > 72 ? 'animate-spin' : ''}`}
-              strokeWidth={2}
-            />
-            <span>
-              {pullRefreshing ? '更新中…' : pullDistance > 72 ? '離して更新' : '引っ張って更新'}
-            </span>
-          </div>
-        </div>
-
         {feedItems.map((item, feedIndex) => {
           if (item.itemType === 'band') {
             const ownerKey = item.userId || item.owner_id;

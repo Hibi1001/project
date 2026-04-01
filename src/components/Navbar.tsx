@@ -1,10 +1,12 @@
-import { Bell, Plus, Search, User as UserIcon } from 'lucide-react';
+import { Bell, Plus, RotateCcw, Search, User as UserIcon } from 'lucide-react';
 
 export interface NavbarProps {
   onOpenNotifications?: () => void;
   hasUnreadNotifications?: boolean;
   onOpenBoard?: () => void;
   onOpenTimeline?: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
   active?: 'timeline' | 'board';
   onOpenPost: () => void;
   /** When true, post button is visible but non-interactive (daily cap). */
@@ -19,6 +21,8 @@ export default function Navbar({
   hasUnreadNotifications = false,
   onOpenBoard,
   onOpenTimeline,
+  onRefresh,
+  refreshing = false,
   active = 'timeline',
   onOpenPost,
   postDisabled = false,
@@ -26,88 +30,88 @@ export default function Navbar({
   profileAvatarUrl,
   profileLabel = 'マイプロフィール',
 }: NavbarProps) {
+  const iconTone =
+    'text-zinc-500 hover:text-zinc-300 active:scale-90 transition-transform';
+  const activeTone = 'text-emerald-500';
+
   return (
     <nav
-      className="pointer-events-auto fixed bottom-0 left-0 right-0 z-50 flex w-full flex-col border-t border-zinc-800 bg-zinc-950 shadow-[0_-1px_0_0_rgba(24,24,27,0.65)]"
+      className="pointer-events-auto fixed bottom-0 left-0 right-0 z-50 w-full border-t border-zinc-800 bg-zinc-950/80 shadow-[0_-1px_0_0_rgba(24,24,27,0.65)] backdrop-blur-md"
       aria-label="メインナビゲーション"
     >
-      <div className="flex h-12 w-full min-h-0 items-center justify-between px-8">
-        <div className="flex w-[92px] shrink-0 items-center justify-start gap-2">
-          <button
-            type="button"
-            onClick={onOpenNotifications}
-            disabled={!onOpenNotifications}
-            className="relative flex h-11 w-11 items-center justify-center rounded-full border border-zinc-700/80 bg-zinc-800 text-zinc-100 transition-colors hover:bg-zinc-700 active:scale-[0.98] disabled:cursor-default disabled:opacity-70"
-            aria-label="通知"
-          >
-            <Bell className="h-5 w-5" strokeWidth={1.75} />
-            {hasUnreadNotifications ? (
-              <span
-                className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-zinc-950"
-                aria-hidden
-              />
-            ) : null}
-          </button>
-
-          {onOpenBoard || onOpenTimeline ? (
-            <button
-              type="button"
-              onClick={active === 'board' ? onOpenTimeline : onOpenBoard}
-              disabled={active === 'board' ? !onOpenTimeline : !onOpenBoard}
-              className={`flex h-11 w-11 items-center justify-center rounded-full border transition-colors hover:bg-zinc-700 active:scale-[0.98] disabled:cursor-default disabled:opacity-70 ${
-                active === 'board'
-                  ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200'
-                  : 'border-zinc-700/80 bg-zinc-800 text-zinc-100'
-              }`}
-              aria-label={active === 'board' ? 'タイムライン' : '募集ボード'}
-              title={active === 'board' ? 'タイムライン' : '募集ボード'}
-            >
-              <Search className="h-5 w-5" strokeWidth={1.75} />
-            </button>
+      <div className="grid h-16 w-full grid-cols-5 items-stretch pb-[env(safe-area-inset-bottom,0px)]">
+        <button
+          type="button"
+          onClick={onOpenNotifications}
+          disabled={!onOpenNotifications}
+          className={`relative flex h-full w-full flex-col items-center justify-center ${iconTone} disabled:opacity-60 disabled:hover:text-zinc-500 disabled:active:scale-100`}
+          aria-label="通知"
+        >
+          <Bell className={`h-6 w-6 ${active === 'timeline' ? activeTone : ''}`} strokeWidth={1.75} />
+          {hasUnreadNotifications ? (
+            <span
+              className="absolute top-3 h-2 w-2 rounded-full bg-red-500 ring-2 ring-zinc-950"
+              style={{ right: 'calc(50% - 10px)' }}
+              aria-hidden
+            />
           ) : null}
-        </div>
+        </button>
 
-        <div className="flex shrink-0 justify-center">
-          <button
-            type="button"
-            onClick={onOpenPost}
-            disabled={postDisabled}
-            title={
-              postDisabled
-                ? '現在はシェアボタンを利用できません'
-                : '曲をシェア'
-            }
-            className={`flex h-11 w-11 items-center justify-center rounded-full border-2 border-emerald-400/40 bg-emerald-500 text-white shadow-md shadow-emerald-500/20 transition-transform hover:border-emerald-300/50 hover:bg-emerald-400 active:scale-[0.97] disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none`}
-            aria-label="曲をシェア"
-          >
-            <Plus className="h-5 w-5" strokeWidth={2.5} />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={!onRefresh || refreshing}
+          className={`flex h-full w-full flex-col items-center justify-center ${iconTone} disabled:opacity-60 disabled:hover:text-zinc-500 disabled:active:scale-100`}
+          aria-label="更新"
+          title="更新"
+        >
+          <RotateCcw
+            className={`h-6 w-6 ${refreshing ? 'animate-spin' : ''}`}
+            strokeWidth={1.75}
+          />
+        </button>
 
-        <div className="flex w-[92px] shrink-0 justify-end">
-          <button
-            type="button"
-            onClick={onOpenProfile}
-            className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-zinc-800 bg-zinc-900/90 text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            aria-label={profileLabel}
-          >
+        <button
+          type="button"
+          onClick={onOpenPost}
+          disabled={postDisabled}
+          title={postDisabled ? '現在はシェアボタンを利用できません' : '曲をシェア'}
+          className="flex h-full w-full flex-col items-center justify-center active:scale-90 transition-transform disabled:opacity-60 disabled:active:scale-100"
+          aria-label="曲をシェア"
+        >
+          <span className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-emerald-400/45 bg-emerald-500 text-white shadow-lg shadow-emerald-500/25">
+            <Plus className="h-6 w-6" strokeWidth={2.5} />
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={active === 'board' ? onOpenTimeline : onOpenBoard}
+          disabled={active === 'board' ? !onOpenTimeline : !onOpenBoard}
+          className={`flex h-full w-full flex-col items-center justify-center ${
+            active === 'board' ? activeTone : iconTone
+          } disabled:opacity-60 disabled:hover:text-zinc-500 disabled:active:scale-100`}
+          aria-label={active === 'board' ? 'タイムライン' : '募集ボード'}
+          title={active === 'board' ? 'タイムライン' : '募集ボード'}
+        >
+          <Search className="h-6 w-6" strokeWidth={1.75} />
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenProfile}
+          className={`flex h-full w-full flex-col items-center justify-center ${iconTone}`}
+          aria-label={profileLabel}
+        >
+          <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-zinc-800 bg-zinc-900/70">
             {profileAvatarUrl?.trim() ? (
-              <img
-                src={profileAvatarUrl}
-                alt=""
-                className="h-full w-full object-cover"
-              />
+              <img src={profileAvatarUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <UserIcon className="h-5 w-5" strokeWidth={1.75} />
+              <UserIcon className="h-6 w-6" strokeWidth={1.75} />
             )}
-          </button>
-        </div>
+          </span>
+        </button>
       </div>
-      <div
-        className="w-full bg-zinc-950"
-        style={{ height: 'env(safe-area-inset-bottom, 0px)' }}
-        aria-hidden
-      />
     </nav>
   );
 }
