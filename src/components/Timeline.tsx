@@ -1281,7 +1281,7 @@ export default function Timeline({
           const songOrdinal = feedItems
             .slice(0, feedIndex)
             .filter((i) => i.itemType === 'song').length;
-          const isFirstSongSlide = songOrdinal === 0;
+          void songOrdinal;
 
           return (
             <motion.section
@@ -1289,7 +1289,7 @@ export default function Timeline({
               data-timeline-post
               data-item-type="song"
               data-post-id={post.id}
-              className={`relative isolate box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start overflow-hidden px-6 pb-48 ${isFirstSongSlide ? 'pt-16' : 'pt-10'}`}
+              className="relative isolate box-border flex h-[100dvh] min-h-[100dvh] shrink-0 snap-start snap-always flex-col items-center justify-start overflow-hidden px-6 pb-48 pt-10"
               style={{ scrollSnapAlign: 'start' }}
               onClick={() => openReplySheet(post.id)}
               onKeyDown={(e) => {
@@ -1321,9 +1321,7 @@ export default function Timeline({
                 aria-hidden
               />
 
-              <div
-                className={`relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-col items-center gap-2 sm:gap-3 pb-24 ${isFirstSongSlide ? '' : '-mt-3 sm:-mt-4'}`}
-              >
+              <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-col items-center gap-2 pb-24 -mt-3 sm:gap-3 sm:-mt-4">
                 {autoplayBlockedPostId === post.id ? (
                   <div className="pointer-events-none absolute inset-0 z-20 flex items-start justify-center pt-10">
                     <button
