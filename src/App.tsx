@@ -5,6 +5,7 @@ import Timeline from './components/Timeline';
 import Profile from './components/Profile';
 import CreatePostModal from './components/CreatePostModal';
 import Notifications from './components/Notifications';
+import BandBoard from './components/BandBoard';
 import Login from './components/Login';
 import InitialProfileSetup from './components/InitialProfileSetup';
 import { supabase } from './lib/supabase';
@@ -21,7 +22,7 @@ import { DAILY_POST_LIMIT } from './constants/posting';
 import type { Session } from '@supabase/supabase-js';
 import { RotateCw } from 'lucide-react';
 
-type Screen = 'lock' | 'timeline' | 'profile' | 'notifications';
+type Screen = 'lock' | 'timeline' | 'board' | 'profile' | 'notifications';
 
 function formatProfilePath(slug: string): string {
   const s = slug.trim();
@@ -242,7 +243,15 @@ function App() {
     setCurrentScreen('notifications');
   }, []);
 
+  const handleOpenBoard = useCallback(() => {
+    setCurrentScreen('board');
+  }, []);
+
   const handleBackFromNotifications = useCallback(() => {
+    setCurrentScreen('timeline');
+  }, []);
+
+  const handleBackFromBoard = useCallback(() => {
     setCurrentScreen('timeline');
   }, []);
 
@@ -444,12 +453,24 @@ function App() {
             timelineRefreshTrigger={timelineRefreshTrigger}
             onOpenNotifications={handleOpenNotifications}
             hasUnreadNotifications={hasUnreadNotifications}
+            onOpenBoard={handleOpenBoard}
             openReplyForPostId={timelineJumpPostId}
             onConsumedOpenReplyForPostId={handleConsumedTimelineJump}
             authUserId={userId}
             feedBootstrap={timelineFeedBootstrap}
           />
         )}
+        {currentScreen === 'board' && userId ? (
+          <BandBoard
+            authUserId={userId}
+            hasUnreadNotifications={hasUnreadNotifications}
+            onOpenNotifications={handleOpenNotifications}
+            onOpenProfile={() => handleViewProfile(userId)}
+            onShareSong={() => setCreatePostModalOpen(true)}
+            onOpenTimeline={handleBackFromBoard}
+            onViewProfile={handleViewProfile}
+          />
+        ) : null}
         {currentScreen === 'profile' && selectedProfileSlug && (
           <Profile
             key={selectedProfileSlug}

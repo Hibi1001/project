@@ -17,6 +17,7 @@ export async function fetchBandProjectsForOwner(
 ): Promise<{
   projects: BandProjectWithRoles[];
   applicantsById: Record<string, ApplicantPreview>;
+  applicantsByRoleId: Record<string, ApplicantPreview[]>;
 }> {
   const { data: projects, error: pErr } = await supabase
     .from('band_projects')
@@ -53,30 +54,35 @@ export async function fetchBandProjectsForOwner(
     byProject.set(r.project_id, list);
   }
 
-  const applicantIds = [
-    ...new Set(
-      roleRows.map((r) => r.applicant_id).filter((id): id is string => Boolean(id)),
-    ),
-  ];
-
+  const roleIds = roleRows.map((r) => r.id);
   const applicantsById: Record<string, ApplicantPreview> = {};
-  if (applicantIds.length > 0) {
-    const { data: users, error: uErr } = await supabase
-      .from('users')
-      .select('id, display_name, avatar_url')
-      .in('id', applicantIds);
+  const applicantsByRoleId: Record<string, ApplicantPreview[]> = {};
+  if (roleIds.length > 0) {
+    const { data: appl, error: aErr } = await supabase
+      .from('band_role_applicants')
+      .select('role_id, user_id, users(id, display_name, avatar_url)')
+      .in('role_id', roleIds);
 
-    if (!uErr && users) {
-      for (const u of users as {
-        id: string;
-        display_name: string;
-        avatar_url: string | null;
-      }[]) {
-        applicantsById[u.id] = {
-          id: u.id,
-          name: u.display_name ?? 'ユーザー',
-          avatar: u.avatar_url ?? '',
+    if (aErr) {
+      console.error('[band_role_applicants] fetch', aErr);
+    } else {
+      for (const rowAny of (appl ?? []) as any[]) {
+        const roleId = String(rowAny.role_id || '').trim();
+        const userId = String(rowAny.user_id || '').trim();
+        if (!roleId || !userId) continue;
+        const u = rowAny.users as
+          | { id: string; display_name: string | null; avatar_url: string | null }
+          | null
+          | undefined;
+        const preview: ApplicantPreview = {
+          id: userId,
+          name: (u?.display_name ?? '').trim() || 'ユーザー',
+          avatar: u?.avatar_url ?? '',
         };
+        applicantsById[userId] = applicantsById[userId] ?? preview;
+        const list = applicantsByRoleId[roleId] ?? [];
+        list.push(preview);
+        applicantsByRoleId[roleId] = list;
       }
     }
   }
@@ -88,7 +94,7 @@ export async function fetchBandProjectsForOwner(
     ),
   }));
 
-  return { projects: projectsWithRoles, applicantsById };
+  return { projects: projectsWithRoles, applicantsById, applicantsByRoleId };
 }
 
 export async function createBandProjectWithRoles(params: {

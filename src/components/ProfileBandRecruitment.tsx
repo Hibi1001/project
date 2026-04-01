@@ -67,8 +67,8 @@ export default function ProfileBandRecruitment({
   authUserId,
 }: Props) {
   const [projects, setProjects] = useState<BandProjectWithRoles[]>([]);
-  const [applicantsById, setApplicantsById] = useState<
-    Record<string, ApplicantPreview>
+  const [applicantsByRoleId, setApplicantsByRoleId] = useState<
+    Record<string, ApplicantPreview[]>
   >({});
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -84,10 +84,10 @@ export default function ProfileBandRecruitment({
   const projectIdsRef = useRef<Set<string>>(new Set());
 
   const reload = useCallback(async () => {
-    const { projects: p, applicantsById: a } =
+    const { projects: p, applicantsByRoleId: ar } =
       await fetchBandProjectsForOwner(ownerUserId);
     setProjects(p);
-    setApplicantsById(a);
+    setApplicantsByRoleId(ar);
     projectIdsRef.current = new Set(p.map((x) => x.id));
   }, [ownerUserId]);
 
@@ -124,6 +124,13 @@ export default function ProfileBandRecruitment({
           const o = payload.old as { owner_id?: string } | undefined;
           const oid = n?.owner_id ?? o?.owner_id;
           if (oid === ownerUserId) void reload();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'band_role_applicants' },
+        () => {
+          void reload();
         },
       )
       .subscribe();
@@ -209,73 +216,51 @@ export default function ProfileBandRecruitment({
       );
       return;
     }
-    const filled = Boolean(role.applicant_id);
-    const isMine = role.applicant_id === authUserId;
-    if (filled && !isMine) return;
+    const list = applicantsByRoleId[role.id] ?? [];
+    const isMine = list.some((a) => a.id === authUserId);
 
     setClaimBusyId(role.id);
     try {
-      if (!filled) {
+      if (!isMine) {
         const { error } = await supabase
-          .from('band_roles')
-          .update({ applicant_id: authUserId })
-          .eq('id', role.id)
-          .is('applicant_id', null);
+          .from('band_role_applicants')
+          .insert({ role_id: role.id, user_id: authUserId });
         if (error) {
           console.error(error);
           setToast(error.message ?? '応募に失敗しました。');
           return;
         }
-        setProjects((prev) =>
-          prev.map((p) =>
-            p.id !== proj.id
-              ? p
-              : {
-                  ...p,
-                  roles: p.roles.map((r) =>
-                    r.id === role.id
-                      ? { ...r, applicant_id: authUserId }
-                      : r,
-                  ),
-                },
-          ),
-        );
         const me = await fetchUserById(authUserId);
         if (me) {
-          setApplicantsById((prev) => ({
-            ...prev,
-            [me.id]: {
-              id: me.id,
-              name: me.name,
-              avatar: me.avatar,
-            },
-          }));
+          setApplicantsByRoleId((prev) => {
+            const cur = prev[role.id] ?? [];
+            if (cur.some((x) => x.id === me.id)) return prev;
+            return { ...prev, [role.id]: [{ id: me.id, name: me.name, avatar: me.avatar }, ...cur] };
+          });
+        } else {
+          setApplicantsByRoleId((prev) => {
+            const cur = prev[role.id] ?? [];
+            if (cur.some((x) => x.id === authUserId)) return prev;
+            return { ...prev, [role.id]: [{ id: authUserId, name: 'ユーザー', avatar: '' }, ...cur] };
+          });
         }
       } else {
         const { error } = await supabase
-          .from('band_roles')
-          .update({ applicant_id: null })
-          .eq('id', role.id)
-          .eq('applicant_id', authUserId);
+          .from('band_role_applicants')
+          .delete()
+          .eq('role_id', role.id)
+          .eq('user_id', authUserId);
         if (error) {
           console.error(error);
           setToast(error.message ?? '取り消しに失敗しました。');
           return;
         }
-        setProjects((prev) =>
-          prev.map((p) =>
-            p.id !== proj.id
-              ? p
-              : {
-                  ...p,
-                  roles: p.roles.map((r) =>
-                    r.id === role.id
-                      ? { ...r, applicant_id: null }
-                      : r,
-                  ),
-                },
-          ),
-        );
+        setApplicantsByRoleId((prev) => {
+          const cur = prev[role.id];
+          if (!cur) return prev;
+          const next = cur.filter((x) => x.id !== authUserId);
+          return { ...prev, [role.id]: next };
+        });
       }
     } finally {
       setClaimBusyId(null);
@@ -350,16 +335,11 @@ export default function ProfileBandRecruitment({
               <div className="mt-2 flex flex-wrap gap-2.5">
                 {proj.roles.map((role) => {
                   const Icon = INSTRUMENT_ICONS[role.instrument_type];
-                  const filled = Boolean(role.applicant_id);
-                  const applicant = role.applicant_id
-                    ? applicantsById[role.applicant_id]
-                    : undefined;
-                  const isMine =
-                    Boolean(authUserId) && role.applicant_id === authUserId;
                   const isOwner =
                     Boolean(authUserId) && proj.owner_id === authUserId;
-                  const otherFilled = filled && !isMine;
-                  const disabled = claimBusyId === role.id || otherFilled;
+                  const roleApplicants = applicantsByRoleId[role.id] ?? [];
+                  const isMine = Boolean(authUserId) && roleApplicants.some((a) => a.id === authUserId);
+                  const disabled = claimBusyId === role.id || isOwner;
 
                   return (
                     <button
@@ -368,82 +348,53 @@ export default function ProfileBandRecruitment({
                       disabled={disabled}
                       onClick={(e) => void handleBandRoleClick(proj, role, e)}
                       className={`group relative flex min-w-[4.5rem] flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 transition-all ${
-                        otherFilled
-                          ? 'cursor-default border-zinc-600/50 bg-zinc-800/80'
-                          : isOwner
-                            ? 'cursor-pointer border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-90'
-                            : filled && isMine
-                              ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
-                              : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
+                        isOwner
+                          ? 'cursor-default border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-80'
+                          : isMine
+                            ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
+                            : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
                       } disabled:opacity-50`}
                       title={
-                        otherFilled
-                          ? applicant?.name
-                            ? `${applicant.name}`
-                            : '埋まっています'
-                          : isOwner
-                            ? '自分の募集（タップで案内）'
-                            : authUserId
-                              ? filled && isMine
-                                ? 'タップで応募を取り消す'
-                                : 'このパートで参加したい（タップ）'
-                              : 'タップでログインの案内'
+                        isOwner
+                          ? '自分の募集'
+                          : authUserId
+                            ? isMine
+                              ? 'タップで応募を取り消す'
+                              : 'このパートで参加したい（タップ）'
+                            : 'タップでログインの案内'
                       }
                     >
                       <div
-                        className={`relative flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-xl bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50 ${
-                          filled && applicant ? 'ring-emerald-500/25' : ''
-                        }`}
+                        className="relative flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-xl bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50"
                       >
-                        {filled && applicant ? (
-                          <>
-                            <img
-                              src={
-                                applicant.avatar ||
-                                'https://placehold.co/64x64?text=U'
-                              }
-                              alt=""
-                              className="h-8 w-8 rounded-full border-2 border-zinc-900 object-cover ring-2 ring-emerald-500/35"
-                            />
-                            <Icon
-                              className="absolute bottom-0.5 right-0.5 h-4 w-4 text-emerald-400/95 drop-shadow-md"
-                              aria-hidden
-                            />
-                          </>
-                        ) : (
-                          <Icon
-                            className={`h-6 w-6 ${
-                              otherFilled
-                                ? 'text-zinc-500'
+                        <Icon
+                          className={`h-6 w-6 ${
+                            isOwner
+                              ? 'text-zinc-500'
+                              : isMine
+                                ? 'text-emerald-400/95'
                                 : 'text-amber-400/90 group-hover:text-amber-300'
-                            }`}
-                          />
-                        )}
+                          }`}
+                        />
                       </div>
-                      {filled && applicant ? (
-                        <span className="max-w-[5.5rem] truncate text-center text-[10px] font-medium text-zinc-300">
-                          {applicant.name}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-medium text-zinc-500">
-                          {INSTRUMENT_LABEL[role.instrument_type]}
-                        </span>
-                      )}
-                      {!filled && !isOwner ? (
-                        <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-500/80">
-                          空き
-                        </span>
-                      ) : null}
-                      {!filled && isOwner ? (
-                        <span className="text-[9px] font-medium text-zinc-500">
-                          募集中
-                        </span>
-                      ) : null}
-                      {filled && isMine ? (
-                        <span className="text-[9px] text-emerald-400/90">
-                          あなた
-                        </span>
-                      ) : null}
+                      <div className="flex -space-x-2">
+                        {roleApplicants.slice(0, 3).map((a) => (
+                          <img
+                            key={a.id}
+                            src={
+                              a.avatar?.trim()
+                                ? a.avatar
+                                : 'https://placehold.co/32x32/27272a/a1a1aa?text=?'
+                            }
+                            alt=""
+                            className="h-5 w-5 rounded-full object-cover ring-2 ring-zinc-950"
+                          />
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-medium text-zinc-500">
+                        {isOwner ? '募集中' : isMine ? '応募済み' : '応募'}
+                        {roleApplicants.length > 0 ? ` · ${roleApplicants.length}` : ''}
+                      </span>
                     </button>
                   );
                 })}

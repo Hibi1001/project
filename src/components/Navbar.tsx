@@ -1,8 +1,11 @@
-import { Bell, Plus, User as UserIcon } from 'lucide-react';
+import { Bell, Plus, Search, User as UserIcon } from 'lucide-react';
 
 export interface NavbarProps {
   onOpenNotifications?: () => void;
   hasUnreadNotifications?: boolean;
+  onOpenBoard?: () => void;
+  onOpenTimeline?: () => void;
+  active?: 'timeline' | 'board';
   onOpenPost: () => void;
   /** When true, post button is visible but non-interactive (daily cap). */
   postDisabled?: boolean;
@@ -14,6 +17,9 @@ export interface NavbarProps {
 export default function Navbar({
   onOpenNotifications,
   hasUnreadNotifications = false,
+  onOpenBoard,
+  onOpenTimeline,
+  active = 'timeline',
   onOpenPost,
   postDisabled = false,
   onOpenProfile,
@@ -26,25 +32,39 @@ export default function Navbar({
       aria-label="メインナビゲーション"
     >
       <div className="flex h-12 w-full min-h-0 items-center justify-between px-8">
-        <div className="flex w-11 shrink-0 justify-start">
-          {onOpenNotifications ? (
+        <div className="flex w-[92px] shrink-0 items-center justify-start gap-2">
+          <button
+            type="button"
+            onClick={onOpenNotifications}
+            disabled={!onOpenNotifications}
+            className="relative flex h-11 w-11 items-center justify-center rounded-full border border-zinc-700/80 bg-zinc-800 text-zinc-100 transition-colors hover:bg-zinc-700 active:scale-[0.98] disabled:cursor-default disabled:opacity-70"
+            aria-label="通知"
+          >
+            <Bell className="h-5 w-5" strokeWidth={1.75} />
+            {hasUnreadNotifications ? (
+              <span
+                className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-zinc-950"
+                aria-hidden
+              />
+            ) : null}
+          </button>
+
+          {onOpenBoard || onOpenTimeline ? (
             <button
               type="button"
-              onClick={onOpenNotifications}
-              className="relative flex h-11 w-11 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900/90 text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-              aria-label="通知"
+              onClick={active === 'board' ? onOpenTimeline : onOpenBoard}
+              disabled={active === 'board' ? !onOpenTimeline : !onOpenBoard}
+              className={`flex h-11 w-11 items-center justify-center rounded-full border transition-colors hover:bg-zinc-700 active:scale-[0.98] disabled:cursor-default disabled:opacity-70 ${
+                active === 'board'
+                  ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200'
+                  : 'border-zinc-700/80 bg-zinc-800 text-zinc-100'
+              }`}
+              aria-label={active === 'board' ? 'タイムライン' : '募集ボード'}
+              title={active === 'board' ? 'タイムライン' : '募集ボード'}
             >
-              <Bell className="h-5 w-5" strokeWidth={1.75} />
-              {hasUnreadNotifications ? (
-                <span
-                  className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-zinc-950"
-                  aria-hidden
-                />
-              ) : null}
+              <Search className="h-5 w-5" strokeWidth={1.75} />
             </button>
-          ) : (
-            <span className="h-11 w-11 shrink-0" aria-hidden />
-          )}
+          ) : null}
         </div>
 
         <div className="flex shrink-0 justify-center">
@@ -64,7 +84,7 @@ export default function Navbar({
           </button>
         </div>
 
-        <div className="flex w-11 shrink-0 justify-end">
+        <div className="flex w-[92px] shrink-0 justify-end">
           <button
             type="button"
             onClick={onOpenProfile}

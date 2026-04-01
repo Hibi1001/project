@@ -67,6 +67,8 @@ interface TimelineProps {
   timelineRefreshTrigger?: number;
   onOpenNotifications?: () => void;
   hasUnreadNotifications?: boolean;
+  /** Open band recruitment board (Navbar). */
+  onOpenBoard?: () => void;
   /** Open reply sheet for this post after feed is ready (e.g. from notification tap). */
   openReplyForPostId?: string | null;
   onConsumedOpenReplyForPostId?: () => void;
@@ -87,6 +89,7 @@ export default function Timeline({
   timelineRefreshTrigger = 0,
   onOpenNotifications,
   hasUnreadNotifications = false,
+  onOpenBoard,
   openReplyForPostId = null,
   onConsumedOpenReplyForPostId,
   authUserId: authUserIdProp,
@@ -173,6 +176,9 @@ export default function Timeline({
       <Navbar
         onOpenNotifications={onOpenNotifications}
         hasUnreadNotifications={hasUnreadNotifications}
+        onOpenBoard={onOpenBoard}
+        onOpenTimeline={undefined}
+        active="timeline"
         onOpenPost={() => onShareSong()}
         postDisabled={false}
         onOpenProfile={() => onViewProfile(myProfileSlug)}
