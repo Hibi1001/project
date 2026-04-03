@@ -19,6 +19,7 @@ import {
   isProfileUuid,
 } from './lib/api';
 import { buildMergedTimelineFeed, type FeedItem } from './lib/timelineFeed';
+import { requestForToken } from './lib/firebase';
 import LoadingSpinner from './components/LoadingSpinner';
 import { DAILY_POST_LIMIT } from './constants/posting';
 import type { Session } from '@supabase/supabase-js';
@@ -221,6 +222,25 @@ function App() {
   }, [session?.user?.id, passcodeOk, refreshPostingState]);
 
   const userId = session?.user?.id ?? null;
+
+  const FCM_SETUP_SESSION_KEY = 'mysession_fcm_setup_v1';
+
+  // FCM: one attempt per browser tab (sessionStorage survives React Strict Mode remounts).
+  useEffect(() => {
+    if (!userId || !passcodeOk || !authReady || profileGate !== 'ok') return;
+    if (currentScreen === 'lock') return;
+    if (typeof window === 'undefined') return;
+    if (window.sessionStorage.getItem(FCM_SETUP_SESSION_KEY) === '1') return;
+    window.sessionStorage.setItem(FCM_SETUP_SESSION_KEY, '1');
+
+    void (async () => {
+      try {
+        await requestForToken();
+      } catch (e) {
+        console.error('[FCM] setup failed', e);
+      }
+    })();
+  }, [userId, passcodeOk, authReady, profileGate, currentScreen]);
 
   // 24-hour grace period: if the user has posted within the last 24 hours,
   // bypass the LockScreen automatically (fast: fetch only the latest post).
