@@ -45,6 +45,7 @@ export async function requestForToken(): Promise<string | null> {
     const registration = await navigator.serviceWorker.register(
       '/firebase-messaging-sw.js',
     );
+    await navigator.serviceWorker.ready;
 
     const currentToken = await getToken(messaging, {
       vapidKey: VAPID_KEY,
