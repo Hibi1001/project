@@ -243,6 +243,20 @@ function App() {
       try {
         const token = await requestForToken();
         console.log('App.tsx で取得したトークン:', token);
+        if (token) {
+          const { error } = await supabase
+            .from('fcm_tokens')
+            .upsert(
+              { user_id: userId, token: token },
+              { onConflict: 'token' },
+            );
+
+          if (error) {
+            console.error('トークンの保存に失敗しました:', error);
+          } else {
+            console.log('トークンをデータベースに保存しました！');
+          }
+        }
       } catch (err) {
         console.error('通知設定中にエラー:', err);
       }
