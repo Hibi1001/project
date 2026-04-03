@@ -90,6 +90,7 @@ function PasscodeForm({ onSuccess }: PasscodeFormProps) {
 }
 
 function App() {
+  console.log("Hello from the top of App.tsx! (デプロイ成功！)");
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [passcodeOk, setPasscodeOk] = useState<boolean>(() => {
