@@ -361,13 +361,21 @@ async function sendToTokens(
   tokens: string[],
   title: string,
   body: string,
-): Promise<{ success: number; failed: number }> {
+): Promise<{ success: number; failed: number; uniqueTokens: number }> {
+  const uniqueTokens = [
+    ...new Set(
+      tokens.map((t) => (typeof t === "string" ? t.trim() : "")).filter((t) =>
+        t.length > 0
+      ),
+    ),
+  ];
+
   const chunkSize = 15;
   let success = 0;
   let failed = 0;
 
-  for (let i = 0; i < tokens.length; i += chunkSize) {
-    const chunk = tokens.slice(i, i + chunkSize);
+  for (let i = 0; i < uniqueTokens.length; i += chunkSize) {
+    const chunk = uniqueTokens.slice(i, i + chunkSize);
     const outcomes = await Promise.all(
       chunk.map((deviceToken) =>
         sendFcmToToken(
@@ -387,7 +395,7 @@ async function sendToTokens(
       }
     }
   }
-  return { success, failed };
+  return { success, failed, uniqueTokens: uniqueTokens.length };
 }
 
 Deno.serve(async (req) => {
@@ -479,7 +487,7 @@ Deno.serve(async (req) => {
     }
 
     const accessToken = await getGoogleAccessToken();
-    const { success, failed } = await sendToTokens(
+    const { success, failed, uniqueTokens: uniqueTokenCount } = await sendToTokens(
       accessToken,
       firebaseProjectId,
       tokens,
@@ -494,7 +502,7 @@ Deno.serve(async (req) => {
         mode: plan.mode,
         sent: success,
         failed,
-        totalTokens: tokens.length,
+        totalTokens: uniqueTokenCount,
       }),
       {
         status: 200,

@@ -4,8 +4,9 @@
  * Server sends data-only payloads (title/body in `data`) so the browser does not auto-show
  * a notification in addition to `showNotification` here (duplicate banners).
  */
-importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js');
+// Keep in sync with `firebase` in package.json (avoids messaging version skew).
+importScripts('https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.11.0/firebase-messaging-compat.js');
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBRyLnyFGIDOYNkE8CJJAAr3HCOCT31XpE',
@@ -19,8 +20,28 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
-messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] 背景で通知を受信:', payload);
+// Only show a system notification when no app tab has focus — otherwise the page
+// handles the same message via `onMessage` (toast) and a banner here would duplicate.
+messaging.onBackgroundMessage(async (payload) => {
+  console.log('[firebase-messaging-sw.js] FCM message in SW:', payload);
+
+  try {
+    const allClients = await self.clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true,
+    });
+    const anyFocused = allClients.some(
+      (c) => c.focused === true && c.visibilityState === 'visible',
+    );
+    if (anyFocused) {
+      console.log(
+        '[firebase-messaging-sw.js] skip system notification (focused client → onMessage / toast)',
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn('[firebase-messaging-sw.js] clients.matchAll failed', e);
+  }
 
   const d = payload.data || {};
   const n = payload.notification;
@@ -37,10 +58,9 @@ messaging.onBackgroundMessage((payload) => {
   const options = {
     body: notificationBody,
     icon: '/favicon.svg',
-    // Same FCM message redelivered → replace one banner instead of stacking duplicates
     tag: payload.messageId || 'mysession-fcm',
     renotify: false,
   };
 
-  return self.registration.showNotification(notificationTitle, options);
+  await self.registration.showNotification(notificationTitle, options);
 });

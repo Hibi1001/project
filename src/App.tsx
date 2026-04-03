@@ -273,9 +273,10 @@ function App() {
     void setupNotifications();
   }, [userId, passcodeOk, authReady, profileGate, currentScreen]);
 
+  // Subscribe whenever the session is ready — not gated on `currentScreen`, so a focused
+  // LockScreen tab still receives `onMessage` while the SW skips duplicate system banners.
   useEffect(() => {
     if (!userId || !passcodeOk || !authReady || profileGate !== 'ok') return;
-    if (currentScreen === 'lock') return;
     let unsubscribe: (() => void) | undefined;
     let toastTimer: ReturnType<typeof setTimeout> | undefined;
     let cancelled = false;
@@ -284,6 +285,10 @@ function App() {
       if (!(await isForegroundMessagingAvailable())) return;
       if (cancelled) return;
       unsubscribe = subscribeForegroundFcmMessages(({ title, body }) => {
+        // Foreground: in-app toast only (never `new Notification()`).
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+          return;
+        }
         if (toastTimer) clearTimeout(toastTimer);
         setFcmToast({ title, body });
         toastTimer = setTimeout(() => setFcmToast(null), 6500);
@@ -295,7 +300,7 @@ function App() {
       if (toastTimer) clearTimeout(toastTimer);
       unsubscribe?.();
     };
-  }, [userId, passcodeOk, authReady, profileGate, currentScreen]);
+  }, [userId, passcodeOk, authReady, profileGate]);
 
   // 24-hour grace period: if the user has posted within the last 24 hours,
   // bypass the LockScreen automatically (fast: fetch only the latest post).
