@@ -1,5 +1,11 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getMessaging, getToken, isSupported } from 'firebase/messaging';
+import {
+  getMessaging,
+  getToken,
+  isSupported,
+  onMessage,
+  type MessagePayload,
+} from 'firebase/messaging';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBRyLnyFGIDOYNkE8CJJAAr3HCOCT31XpE',
@@ -17,6 +23,36 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 /** クライアント専用。このモジュールはブラウザからのみ import すること。 */
 export const messaging = getMessaging(app);
+
+export async function isForegroundMessagingAvailable(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  return isSupported();
+}
+
+/**
+ * フォアグラウンド専用。`new Notification()` は使わず、コールバックで UI（トースト等）に渡す。
+ * バックグラウンド表示は Service Worker の onBackgroundMessage のみ。
+ */
+export function subscribeForegroundFcmMessages(
+  handler: (payload: { title: string; body: string; messageId?: string }) => void,
+): () => void {
+  return onMessage(messaging, (payload: MessagePayload) => {
+    const d = payload.data;
+    const title =
+      (typeof d?.title === 'string' && d.title.trim()) ||
+      payload.notification?.title ||
+      '通知';
+    const body =
+      (typeof d?.body === 'string' && d.body) ||
+      payload.notification?.body ||
+      '';
+    handler({
+      title,
+      body,
+      messageId: payload.messageId,
+    });
+  });
+}
 
 /**
  * 通知の許可を得て FCM トークンを取得する。

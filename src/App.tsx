@@ -19,7 +19,11 @@ import {
   isProfileUuid,
 } from './lib/api';
 import { buildMergedTimelineFeed, type FeedItem } from './lib/timelineFeed';
-import { requestForToken } from './lib/firebase';
+import {
+  isForegroundMessagingAvailable,
+  requestForToken,
+  subscribeForegroundFcmMessages,
+} from './lib/firebase';
 import LoadingSpinner from './components/LoadingSpinner';
 import { DAILY_POST_LIMIT } from './constants/posting';
 import type { Session } from '@supabase/supabase-js';
@@ -117,6 +121,10 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [todaysPostCount, setTodaysPostCount] = useState(0);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+  /** Foreground FCM: in-app toast only (no `new Notification()` — avoids duplicate with SW). */
+  const [fcmToast, setFcmToast] = useState<{ title: string; body: string } | null>(
+    null,
+  );
   const [timelineJumpPostId, setTimelineJumpPostId] = useState<string | null>(
     null,
   );
@@ -263,6 +271,30 @@ function App() {
     };
 
     void setupNotifications();
+  }, [userId, passcodeOk, authReady, profileGate, currentScreen]);
+
+  useEffect(() => {
+    if (!userId || !passcodeOk || !authReady || profileGate !== 'ok') return;
+    if (currentScreen === 'lock') return;
+    let unsubscribe: (() => void) | undefined;
+    let toastTimer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    void (async () => {
+      if (!(await isForegroundMessagingAvailable())) return;
+      if (cancelled) return;
+      unsubscribe = subscribeForegroundFcmMessages(({ title, body }) => {
+        if (toastTimer) clearTimeout(toastTimer);
+        setFcmToast({ title, body });
+        toastTimer = setTimeout(() => setFcmToast(null), 6500);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      if (toastTimer) clearTimeout(toastTimer);
+      unsubscribe?.();
+    };
   }, [userId, passcodeOk, authReady, profileGate, currentScreen]);
 
   // 24-hour grace period: if the user has posted within the last 24 hours,
@@ -583,6 +615,28 @@ function App() {
 
   return (
     <div className="relative min-h-[100dvh] w-full overflow-x-hidden bg-zinc-950 text-zinc-50">
+      <AnimatePresence>
+        {fcmToast && (
+          <motion.div
+            key={`${fcmToast.title}\0${fcmToast.body}`}
+            role="status"
+            aria-live="polite"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.2 }}
+            className="fixed bottom-6 left-1/2 z-[240] w-[min(92vw,22rem)] -translate-x-1/2 cursor-pointer rounded-2xl border border-zinc-700 bg-zinc-900/95 px-4 py-3 text-left shadow-xl backdrop-blur-sm"
+            onClick={() => setFcmToast(null)}
+          >
+            <p className="text-sm font-semibold text-zinc-50">{fcmToast.title}</p>
+            {fcmToast.body ? (
+              <p className="mt-1 line-clamp-3 text-xs leading-snug text-zinc-400">
+                {fcmToast.body}
+              </p>
+            ) : null}
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence mode="popLayout">
         {currentScreen === 'lock' && (
           <motion.div key="lock" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

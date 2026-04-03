@@ -109,6 +109,11 @@ async function getGoogleAccessToken(): Promise<string> {
   return json.access_token;
 }
 
+/**
+ * Data-only payload avoids the browser auto-displaying a notification in the background
+ * while `onBackgroundMessage` also calls `showNotification` (duplicate banners).
+ * Title/body are read in the client SW and in `onMessage` (foreground toast).
+ */
 async function sendFcmToToken(
   accessToken: string,
   firebaseProjectId: string,
@@ -127,12 +132,31 @@ async function sendFcmToToken(
     body: JSON.stringify({
       message: {
         token: deviceToken,
-        notification: { title, body },
+        data: {
+          title,
+          body,
+        },
       },
     }),
   });
   const detail = await res.text();
   return { ok: res.ok, status: res.status, detail };
+}
+
+/** One FCM HTTP request per unique token string (dedupe duplicate DB rows). */
+function dedupeFcmTokenStrings(
+  rows: { token?: string | null }[] | null,
+): string[] {
+  const raw = (rows ?? []).map((r) =>
+    typeof r.token === "string" ? r.token.trim() : ""
+  ).filter((t) => t.length > 0);
+  const uniqueTokens = [...new Set(raw)];
+  if (raw.length !== uniqueTokens.length) {
+    console.log(
+      `[send-notification] deduped FCM tokens: ${raw.length} rows -> ${uniqueTokens.length} unique`,
+    );
+  }
+  return uniqueTokens;
 }
 
 async function fetchAllFcmTokens(
@@ -146,14 +170,7 @@ async function fetchAllFcmTokens(
     return { tokens: [], error: dbError.message };
   }
 
-  const tokens = Array.from(
-    new Set(
-      (rows ?? [])
-        .map((r: { token?: string }) => r.token)
-        .filter((t): t is string => typeof t === "string" && t.length > 0),
-    ),
-  );
-  return { tokens, error: null };
+  return { tokens: dedupeFcmTokenStrings(rows ?? []), error: null };
 }
 
 async function fetchFcmTokensForUser(
@@ -169,14 +186,7 @@ async function fetchFcmTokensForUser(
     return { tokens: [], error: dbError.message };
   }
 
-  const tokens = Array.from(
-    new Set(
-      (rows ?? [])
-        .map((r: { token?: string }) => r.token)
-        .filter((t): t is string => typeof t === "string" && t.length > 0),
-    ),
-  );
-  return { tokens, error: null };
+  return { tokens: dedupeFcmTokenStrings(rows ?? []), error: null };
 }
 
 async function fetchPostAuthorUserId(
