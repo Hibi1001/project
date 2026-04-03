@@ -233,13 +233,21 @@ function App() {
     if (window.sessionStorage.getItem(FCM_SETUP_SESSION_KEY) === '1') return;
     window.sessionStorage.setItem(FCM_SETUP_SESSION_KEY, '1');
 
-    void (async () => {
+    // デバッグ用（実際のリクエストはログイン・パスコード・プロフィール準備完了後に一度だけ）
+    console.log(
+      '--- App.tsx が起動しました。通知リクエストを開始します ---',
+    );
+
+    const setupNotifications = async () => {
       try {
-        await requestForToken();
-      } catch (e) {
-        console.error('[FCM] setup failed', e);
+        const token = await requestForToken();
+        console.log('App.tsx で取得したトークン:', token);
+      } catch (err) {
+        console.error('通知設定中にエラー:', err);
       }
-    })();
+    };
+
+    void setupNotifications();
   }, [userId, passcodeOk, authReady, profileGate, currentScreen]);
 
   // 24-hour grace period: if the user has posted within the last 24 hours,
