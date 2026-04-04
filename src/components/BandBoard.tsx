@@ -21,6 +21,7 @@ import { fetchTimelineBandProjects } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import Navbar from './Navbar';
 import LoadingSpinner from './LoadingSpinner';
+import UserSearch from './UserSearch';
 
 const INSTRUMENTS: InstrumentType[] = [
   'vocal',
@@ -575,6 +576,13 @@ export default function BandBoard({
                 </button>
               );
             })}
+          </div>
+
+          <div className="mt-4 border-t border-zinc-800/80 pt-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+              ユーザー検索
+            </p>
+            <UserSearch onSelectUser={onViewProfile} />
           </div>
         </div>
       </div>
