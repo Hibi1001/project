@@ -159,6 +159,39 @@ async function sendFcmToToken(
   return { ok: res.ok, status: res.status, detail };
 }
 
+/**
+ * Expired / uninstalled clients: FCM v1 often returns HTTP 404 with NOT_FOUND, or the
+ * legacy-style "NotRegistered" / "UNREGISTERED" strings in the error body.
+ */
+function isUnregisteredFcmToken(status: number, detail: string): boolean {
+  if (status === 404) return true;
+  const u = detail.toUpperCase();
+  if (u.includes("NOTREGISTERED") || u.includes("UNREGISTERED")) return true;
+  return false;
+}
+
+const DELETE_TOKENS_IN_CHUNK = 80;
+
+async function deleteFcmTokensByValue(
+  supabase: SupabaseClient,
+  tokens: string[],
+): Promise<{ deletedAttempt: number; error: string | null }> {
+  const unique = [...new Set(tokens.map((t) => t.trim()).filter((t) => t.length > 0))];
+  if (unique.length === 0) {
+    return { deletedAttempt: 0, error: null };
+  }
+
+  for (let i = 0; i < unique.length; i += DELETE_TOKENS_IN_CHUNK) {
+    const slice = unique.slice(i, i + DELETE_TOKENS_IN_CHUNK);
+    const { error } = await supabase.from("fcm_tokens").delete().in("token", slice);
+    if (error) {
+      return { deletedAttempt: unique.length, error: error.message };
+    }
+  }
+
+  return { deletedAttempt: unique.length, error: null };
+}
+
 /** One FCM HTTP request per unique token string (dedupe duplicate DB rows). */
 function dedupeFcmTokenStrings(
   rows: { token?: string | null }[] | null,
@@ -472,7 +505,12 @@ async function sendToTokens(
   title: string,
   body: string,
   data?: Record<string, string>,
-): Promise<{ success: number; failed: number; uniqueTokens: number }> {
+): Promise<{
+  success: number;
+  failed: number;
+  uniqueTokens: number;
+  invalidTokens: string[];
+}> {
   const uniqueTokens = [
     ...new Set(
       tokens.map((t) => (typeof t === "string" ? t.trim() : "")).filter((t) =>
@@ -481,6 +519,9 @@ async function sendToTokens(
     ),
   ];
 
+  const invalidTokens: string[] = [];
+  const invalidSet = new Set<string>();
+
   const chunkSize = 15;
   let success = 0;
   let failed = 0;
@@ -488,26 +529,33 @@ async function sendToTokens(
   for (let i = 0; i < uniqueTokens.length; i += chunkSize) {
     const chunk = uniqueTokens.slice(i, i + chunkSize);
     const outcomes = await Promise.all(
-      chunk.map((deviceToken) =>
-        sendFcmToToken(
+      chunk.map(async (deviceToken) => {
+        const r = await sendFcmToToken(
           accessToken,
           firebaseProjectId,
           deviceToken,
           title,
           body,
           data,
-        )
-      ),
+        );
+        return { ...r, deviceToken };
+      }),
     );
     for (const o of outcomes) {
       if (o.ok) success++;
       else {
         failed++;
+        if (isUnregisteredFcmToken(o.status, o.detail)) {
+          if (!invalidSet.has(o.deviceToken)) {
+            invalidSet.add(o.deviceToken);
+            invalidTokens.push(o.deviceToken);
+          }
+        }
         console.error("FCM send failed:", o.status, o.detail);
       }
     }
   }
-  return { success, failed, uniqueTokens: uniqueTokens.length };
+  return { success, failed, uniqueTokens: uniqueTokens.length, invalidTokens };
 }
 
 Deno.serve(async (req) => {
@@ -599,13 +647,34 @@ Deno.serve(async (req) => {
     }
 
     const accessToken = await getGoogleAccessToken();
-    const { success, failed, uniqueTokens: uniqueTokenCount } = await sendToTokens(
-      accessToken,
-      firebaseProjectId,
-      tokens,
-      plan.title,
-      plan.body,
-      plan.data,
+    const { success, failed, uniqueTokens: uniqueTokenCount, invalidTokens } =
+      await sendToTokens(
+        accessToken,
+        firebaseProjectId,
+        tokens,
+        plan.title,
+        plan.body,
+        plan.data,
+      );
+
+    let tokensCleanedUp = 0;
+    let cleanupError: string | null = null;
+    if (invalidTokens.length > 0) {
+      const del = await deleteFcmTokensByValue(supabase, invalidTokens);
+      tokensCleanedUp = del.deletedAttempt;
+      cleanupError = del.error;
+      if (cleanupError) {
+        console.error(
+          "[send-notification] failed to delete invalid fcm_tokens:",
+          cleanupError,
+        );
+      }
+    }
+
+    console.log(
+      `[send-notification] FCM summary: sent=${success} failed_non_unreg=${
+        failed - invalidTokens.length
+      } invalid_unregistered=${invalidTokens.length} tokens_removed_from_db=${tokensCleanedUp}`,
     );
 
     return new Response(
@@ -616,6 +685,9 @@ Deno.serve(async (req) => {
         sent: success,
         failed,
         totalTokens: uniqueTokenCount,
+        invalidTokensDetected: invalidTokens.length,
+        tokensCleanedUp,
+        ...(cleanupError ? { cleanupError } : {}),
       }),
       {
         status: 200,
