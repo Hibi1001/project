@@ -22,6 +22,9 @@ const TABLES_HANDLED = new Set([
   "post_likes",
   "reply_likes",
   "band_role_applicants",
+  /** App schema uses `post_replies`; `comments` supported if you add that table with same shape. */
+  "post_replies",
+  "comments",
 ]);
 
 interface DbWebhookPayload {
@@ -114,12 +117,28 @@ async function getGoogleAccessToken(): Promise<string> {
  * while `onBackgroundMessage` also calls `showNotification` (duplicate banners).
  * Title/body are read in the client SW and in `onMessage` (foreground toast).
  */
+/** FCM `data` values must be strings. */
+function buildFcmDataPayload(
+  title: string,
+  body: string,
+  extra?: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = { title, body };
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (typeof v === "string") out[k] = v;
+    }
+  }
+  return out;
+}
+
 async function sendFcmToToken(
   accessToken: string,
   firebaseProjectId: string,
   deviceToken: string,
   title: string,
   body: string,
+  data?: Record<string, string>,
 ): Promise<{ ok: boolean; status: number; detail: string }> {
   const url =
     `https://fcm.googleapis.com/v1/projects/${firebaseProjectId}/messages:send`;
@@ -132,10 +151,7 @@ async function sendFcmToToken(
     body: JSON.stringify({
       message: {
         token: deviceToken,
-        data: {
-          title,
-          body,
-        },
+        data: buildFcmDataPayload(title, body, data),
       },
     }),
   });
@@ -219,6 +235,23 @@ async function fetchReplyAuthorUserId(
   return typeof uid === "string" && uid.length > 0 ? uid : null;
 }
 
+/** Parent row author for threaded comments/replies (`comments` or `post_replies`). */
+async function fetchCommentRowAuthorUserId(
+  supabase: SupabaseClient,
+  table: "comments" | "post_replies",
+  rowId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from(table)
+    .select("user_id")
+    .eq("id", rowId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const uid = (data as { user_id?: string }).user_id;
+  return typeof uid === "string" && uid.length > 0 ? uid : null;
+}
+
 /** Owner of the band project (recruitment creator). */
 async function resolveBandProjectOwnerId(
   supabase: SupabaseClient,
@@ -253,8 +286,79 @@ async function resolveBandProjectOwnerId(
 }
 
 type NotifyPlan =
-  | { mode: "broadcast"; title: string; body: string }
-  | { mode: "targeted"; title: string; body: string; userId: string };
+  | { mode: "broadcast"; title: string; body: string; data?: Record<string, string> }
+  | {
+    mode: "targeted";
+    title: string;
+    body: string;
+    userId: string;
+    data?: Record<string, string>;
+  };
+
+/** `parent_comment_id` (comments table) or `parent_id` (post_replies). */
+function parentCommentIdFromRecord(record: Record<string, unknown>): string | null {
+  return asNonEmptyString(record.parent_comment_id) ??
+    asNonEmptyString(record.parent_id);
+}
+
+function commentAuthorIdFromRecord(record: Record<string, unknown>): string | null {
+  return asNonEmptyString(record.user_id) ?? asNonEmptyString(record.author_id);
+}
+
+function commentBodyFromRecord(record: Record<string, unknown>): string {
+  const t = asNonEmptyString(record.content) ?? asNonEmptyString(record.body);
+  return truncateBody(t ?? "");
+}
+
+async function planCommentInsertNotification(
+  supabase: SupabaseClient,
+  table: "comments" | "post_replies",
+  record: Record<string, unknown>,
+): Promise<{ plan: NotifyPlan | null; skipReason?: string }> {
+  const postId = asNonEmptyString(record.post_id);
+  const authorId = commentAuthorIdFromRecord(record);
+  if (!postId) {
+    return { plan: null, skipReason: "comment missing post_id" };
+  }
+  if (!authorId) {
+    return { plan: null, skipReason: "comment missing user_id" };
+  }
+
+  const parentId = parentCommentIdFromRecord(record);
+  let recipientId: string | null;
+
+  if (parentId) {
+    recipientId = await fetchCommentRowAuthorUserId(supabase, table, parentId);
+    if (!recipientId) {
+      return { plan: null, skipReason: "parent comment author not found" };
+    }
+  } else {
+    recipientId = await fetchPostAuthorUserId(supabase, postId);
+    if (!recipientId) {
+      return { plan: null, skipReason: "post author not found" };
+    }
+  }
+
+  if (recipientId === authorId) {
+    return { plan: null, skipReason: "self-comment or self-reply" };
+  }
+
+  const title = parentId ? "返信が届きました" : "新着コメントがあります";
+  const body = commentBodyFromRecord(record) || "（内容なし）";
+
+  return {
+    plan: {
+      mode: "targeted",
+      title,
+      body,
+      userId: recipientId,
+      data: {
+        click_action: "/",
+        post_id: postId,
+      },
+    },
+  };
+}
 
 async function planNotification(
   supabase: SupabaseClient,
@@ -350,6 +454,12 @@ async function planNotification(
       };
     }
 
+    case "post_replies":
+      return planCommentInsertNotification(supabase, "post_replies", record);
+
+    case "comments":
+      return planCommentInsertNotification(supabase, "comments", record);
+
     default:
       return { plan: null, skipReason: "unknown table" };
   }
@@ -361,6 +471,7 @@ async function sendToTokens(
   tokens: string[],
   title: string,
   body: string,
+  data?: Record<string, string>,
 ): Promise<{ success: number; failed: number; uniqueTokens: number }> {
   const uniqueTokens = [
     ...new Set(
@@ -384,6 +495,7 @@ async function sendToTokens(
           deviceToken,
           title,
           body,
+          data,
         )
       ),
     );
@@ -493,6 +605,7 @@ Deno.serve(async (req) => {
       tokens,
       plan.title,
       plan.body,
+      plan.data,
     );
 
     return new Response(
