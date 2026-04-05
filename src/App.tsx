@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import LockScreen from './components/LockScreen';
 import Timeline from './components/Timeline';
@@ -31,6 +31,17 @@ import { RotateCw } from 'lucide-react';
 
 console.log("Hello from the top of App.tsx!");
 type Screen = 'lock' | 'timeline' | 'board' | 'profile' | 'notifications';
+
+const HAS_SEEN_WELCOME_KEY = 'mysession_has_seen_welcome_v1';
+
+function readHasSeenWelcome(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(HAS_SEEN_WELCOME_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 function formatProfilePath(slug: string): string {
   const s = slug.trim();
@@ -103,7 +114,22 @@ function App() {
     const current = window.localStorage.getItem('isPasscodeValid') === 'true';
     return legacy || current;
   });
+  const [hasSeenWelcome, setHasSeenWelcome] = useState(readHasSeenWelcome);
   const [currentScreen, setCurrentScreen] = useState<Screen>('lock');
+
+  const markWelcomeSeen = useCallback(() => {
+    setHasSeenWelcome(true);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(HAS_SEEN_WELCOME_KEY, 'true');
+      }
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, []);
+
+  const currentScreenRef = useRef(currentScreen);
+  currentScreenRef.current = currentScreen;
   /** UUID or `display_id` slug (no leading @). */
   const [selectedProfileSlug, setSelectedProfileSlug] = useState<string | null>(
     null,
@@ -199,6 +225,13 @@ function App() {
     }
   }, [authReady, session?.user?.id, passcodeOk]);
 
+  /** Returning users: never leave them stuck on the welcome (lock) screen after SPA navigation. */
+  useEffect(() => {
+    if (!passcodeOk || !authReady || !session?.user?.id) return;
+    if (!hasSeenWelcome) return;
+    setCurrentScreen((s) => (s === 'lock' ? 'timeline' : s));
+  }, [passcodeOk, authReady, session?.user?.id, hasSeenWelcome]);
+
   useEffect(() => {
     const onPop = () => {
       const slug = parseProfilePath(window.location.pathname);
@@ -216,6 +249,7 @@ function App() {
 
   const handleUnlock = () => {
     setHasUserGesture(true);
+    markWelcomeSeen();
     setCurrentScreen('timeline');
   };
 
@@ -304,6 +338,8 @@ function App() {
 
   // 24-hour grace period: if the user has posted within the last 24 hours,
   // bypass the LockScreen automatically (fast: fetch only the latest post).
+  // Intentionally does NOT depend on `currentScreen` — that was re-firing on every navigation
+  // and contributed to inconsistent routing when returning from Profile / Board.
   useEffect(() => {
     if (!userId || !passcodeOk || !authReady) return;
     let cancelled = false;
@@ -328,7 +364,8 @@ function App() {
         const t = new Date(createdAt).getTime();
         if (!Number.isFinite(t)) return;
         const within24h = Date.now() - t < 24 * 60 * 60 * 1000;
-        if (within24h && currentScreen === 'lock') {
+        if (within24h && currentScreenRef.current === 'lock') {
+          markWelcomeSeen();
           setCurrentScreen('timeline');
         }
       } finally {
@@ -339,7 +376,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [userId, passcodeOk, authReady, currentScreen]);
+  }, [userId, passcodeOk, authReady, markWelcomeSeen]);
 
   const refreshUnreadNotifications = useCallback(async () => {
     if (!userId || profileGate !== 'ok') return;
@@ -387,7 +424,10 @@ function App() {
   }, [currentScreen]);
 
   const handleBackFromNotifications = useCallback(() => {
-    setCurrentScreen(backDestination);
+    const dest = backDestination;
+    const next: Screen =
+      dest === 'lock' || dest === 'profile' ? 'timeline' : dest;
+    setCurrentScreen(next);
   }, [backDestination]);
 
   /** Band board “back to feed” — always returns to the main timeline. */
@@ -543,7 +583,10 @@ function App() {
   };
 
   const handleBackFromProfile = () => {
-    setCurrentScreen(backDestination);
+    const dest = backDestination;
+    const nextScreen: Screen =
+      dest === 'lock' || dest === 'profile' ? 'timeline' : dest;
+    setCurrentScreen(nextScreen);
     setSelectedProfileSlug(null);
     if (typeof window !== 'undefined') {
       window.history.pushState(null, '', '/');
@@ -643,11 +686,12 @@ function App() {
         )}
       </AnimatePresence>
       <AnimatePresence mode="popLayout">
-        {currentScreen === 'lock' && (
+        {currentScreen === 'lock' && !hasSeenWelcome && (
           <motion.div key="lock" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <LockScreen
               onUnlock={() => {
                 setHasUserGesture(true);
+                markWelcomeSeen();
                 setCreatePostModalOpen(true);
               }}
               onViewTimelineOnly={handleUnlock}

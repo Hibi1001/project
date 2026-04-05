@@ -131,6 +131,8 @@ export default function Timeline({
   /** Last “stable” active post after scroll debounce (for pause-on-scroll only). */
   const prevStableActiveRef = useRef<string | null>(null);
   const activePostIdRef = useRef<string | null>(null);
+  const isPlayingRef = useRef(false);
+  const ioObserverRef = useRef<IntersectionObserver | null>(null);
   /** When true, active id changed from an explicit play tap — don’t force pause. */
   const skipPlayingResetRef = useRef(false);
   const spotifyPlayerRef = useRef<SpotifyPlayerHandle>(null);
@@ -221,6 +223,7 @@ export default function Timeline({
     : null;
 
   activePostIdRef.current = activePostId;
+  isPlayingRef.current = isPlaying;
 
   useEffect(() => {
     onActivePostIdChange?.(activePostId);
@@ -731,56 +734,85 @@ export default function Timeline({
     return () => clearTimeout(timer);
   }, [activePostId, posts]);
 
+  /**
+   * Self-healing IntersectionObserver: after SPA navigation / `display:none`, the root may
+   * have had zero size when nodes were first observed. Disconnect, wait 100ms, re-observe,
+   * then nudge scroll + resync `<audio>` to match `activePostId`.
+   */
   useEffect(() => {
-    const root = scrollRef.current;
-    if (!root || feedItems.length === 0) return;
+    ioObserverRef.current?.disconnect();
+    ioObserverRef.current = null;
+
+    if (!isForeground || feedItems.length === 0) return;
 
     const ratios = new Map<Element, number>();
-    let raf = 0;
+    let cancelled = false;
 
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const en of entries) {
-          if (en.isIntersecting) ratios.set(en.target, en.intersectionRatio);
-          else ratios.delete(en.target);
-        }
-        if (ratios.size === 0) return;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      const root = scrollRef.current;
+      if (!root || root.getBoundingClientRect().height < 2) return;
 
-        let bestEl: Element | null = null;
-        let best = 0;
-        for (const [el, r] of ratios) {
-          if (r > best) {
-            best = r;
-            bestEl = el;
+      ioObserverRef.current?.disconnect();
+
+      const obs = new IntersectionObserver(
+        (entries) => {
+          for (const en of entries) {
+            if (en.isIntersecting) ratios.set(en.target, en.intersectionRatio);
+            else ratios.delete(en.target);
           }
-        }
-        if (!(bestEl instanceof HTMLElement)) return;
-        const itemType = bestEl.dataset.itemType as 'song' | 'band' | undefined;
-        const postId = bestEl.dataset.postId ?? null;
-        if (itemType === 'band') {
-          focusTimelineFromScroll('band', null);
-        } else if (itemType === 'song' && postId) {
-          focusTimelineFromScroll('song', postId);
-        }
-      },
-      {
-        root,
-        rootMargin: '0px 0px -8% 0px',
-        threshold: [0.8, 0.9, 1],
-      },
-    );
+          if (ratios.size === 0) return;
 
-    raf = requestAnimationFrame(() => {
+          let bestEl: Element | null = null;
+          let best = 0;
+          for (const [el, r] of ratios) {
+            if (r > best) {
+              best = r;
+              bestEl = el;
+            }
+          }
+          if (!(bestEl instanceof HTMLElement)) return;
+          const itemType = bestEl.dataset.itemType as 'song' | 'band' | undefined;
+          const postId = bestEl.dataset.postId ?? null;
+          if (itemType === 'band') {
+            focusTimelineFromScroll('band', null);
+          } else if (itemType === 'song' && postId) {
+            focusTimelineFromScroll('song', postId);
+          }
+        },
+        {
+          root,
+          rootMargin: '0px 0px -8% 0px',
+          threshold: [0.8, 0.9, 1],
+        },
+      );
+
+      ioObserverRef.current = obs;
       root.querySelectorAll('[data-timeline-post]').forEach((el) => {
         obs.observe(el);
       });
-    });
+
+      const pid = activePostIdRef.current?.trim();
+      if (pid) {
+        root
+          .querySelector(`[data-post-id="${CSS.escape(pid)}"]`)
+          ?.scrollIntoView({ behavior: 'auto', block: 'center' });
+      }
+
+      const wantPlay = isPlayingRef.current;
+      void spotifyPlayerRef.current?.resyncPlayback(wantPlay).catch(() => {
+        if (wantPlay) setIsPlaying(false);
+      });
+    }, 100);
 
     return () => {
-      cancelAnimationFrame(raf);
-      obs.disconnect();
+      cancelled = true;
+      window.clearTimeout(timer);
+      ioObserverRef.current?.disconnect();
+      ioObserverRef.current = null;
+      ratios.clear();
     };
-  }, [feedItems, focusTimelineFromScroll]);
+  }, [isForeground, feedItems, focusTimelineFromScroll]);
 
   // Autoplay is allowed only after a user gesture (browser policy).
   useEffect(() => {

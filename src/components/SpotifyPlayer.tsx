@@ -21,6 +21,8 @@ export type SpotifyPlayerHandle = {
   loadAndPlayFromGesture: () => Promise<void>;
   /** Immediately pause + reset playback position. */
   pauseAndReset: () => void;
+  /** Force reload current `src` (e.g. after timeline IO rebind / SPA visibility). */
+  resyncPlayback: (shouldPlay: boolean) => Promise<void>;
 };
 
 function effectiveDurationSeconds(a: HTMLAudioElement): number {
@@ -187,6 +189,14 @@ const SpotifyPlayer = forwardRef<SpotifyPlayerHandle, SpotifyPlayerProps>(
         }
         setPlayingRef.current(false);
         onProgressRef.current(0);
+      },
+      resyncPlayback: async (shouldPlay: boolean) => {
+        const a = audioRef.current;
+        const url = latestSrcRef.current;
+        if (!a || !url?.trim()) return;
+        playingRef.current = shouldPlay;
+        lastBoundSrcRef.current = null;
+        await loadThenMaybePlay(a, url, shouldPlay);
       },
     }));
 
