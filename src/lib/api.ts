@@ -681,7 +681,19 @@ export interface CreatePostParams {
   caption?: string | null;
 }
 
-export async function createPost(params: CreatePostParams): Promise<Post> {
+/** Total post count thresholds for share celebrations (after a successful insert). */
+export const POST_SHARE_MILESTONES = [1, 10, 30, 50, 100] as const;
+
+export type CreatePostResult = {
+  post: Post;
+  /**
+   * When the user's total post count after insert matches a milestone; `null` if not a milestone
+   * or the count query failed (does not block posting).
+   */
+  milestonePostCount: number | null;
+};
+
+export async function createPost(params: CreatePostParams): Promise<CreatePostResult> {
   const rawCap = params.caption?.trim() ?? '';
   const caption =
     rawCap.length > 0
@@ -707,7 +719,28 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
     throw new Error(error.message);
   }
 
-  return mapDbPostToPost(data as DbPost, undefined, 0);
+  const post = mapDbPostToPost(data as DbPost, undefined, 0);
+
+  let milestonePostCount: number | null = null;
+  try {
+    const { count, error: countError } = await supabase
+      .from('posts')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', params.userId);
+
+    if (countError) {
+      console.warn('[createPost] milestone count query failed', countError);
+    } else if (typeof count === 'number') {
+      const milestoneSet = new Set<number>([...POST_SHARE_MILESTONES]);
+      if (milestoneSet.has(count)) {
+        milestonePostCount = count;
+      }
+    }
+  } catch (e) {
+    console.warn('[createPost] milestone count unexpected error', e);
+  }
+
+  return { post, milestonePostCount };
 }
 
 async function fetchReplyLikeAggregates(

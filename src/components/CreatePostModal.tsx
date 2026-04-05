@@ -45,6 +45,7 @@ export default function CreatePostModal({
   const [selectedTrack, setSelectedTrack] = useState<ItunesShareTrack | null>(
     null,
   );
+  const [milestoneMessage, setMilestoneMessage] = useState<string | null>(null);
 
   const runSearch = useCallback(async () => {
     if (!isOpen) return;
@@ -148,6 +149,12 @@ export default function CreatePostModal({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!milestoneMessage) return;
+    const t = window.setTimeout(() => setMilestoneMessage(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [milestoneMessage]);
+
   const handleSelectTrack = (track: ItunesShareTrack) => {
     if (isSubmitting) return;
     setError(null);
@@ -161,7 +168,7 @@ export default function CreatePostModal({
     try {
       const previewUrl = selectedTrack.previewUrl?.trim() || null;
 
-      await createPost({
+      const { milestonePostCount } = await createPost({
         userId,
         trackName: selectedTrack.name,
         artistName: selectedTrack.artist,
@@ -176,6 +183,11 @@ export default function CreatePostModal({
       setSearchQuery('');
       setCaption('');
       setSelectedTrack(null);
+      if (milestonePostCount != null) {
+        setMilestoneMessage(
+          `🎉 楽曲シェア数が${milestonePostCount}回達成！この調子でみんなと「好き」を共有しよう！`,
+        );
+      }
       onClose();
       onSubmitSuccess();
     } catch (err) {
@@ -207,7 +219,28 @@ export default function CreatePostModal({
     recommendedTracks.length > 0;
 
   return (
-    <AnimatePresence>
+    <>
+      <AnimatePresence>
+        {milestoneMessage && (
+          <motion.div
+            key="milestone-toast"
+            role="status"
+            aria-live="polite"
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.25 }}
+            className="fixed bottom-6 left-1/2 z-[120] w-[min(92vw,24rem)] -translate-x-1/2 cursor-pointer rounded-2xl border border-amber-500/35 bg-gradient-to-br from-amber-950/95 via-zinc-900/98 to-zinc-950 px-4 py-3 text-center shadow-xl shadow-amber-900/20 backdrop-blur-sm"
+            onClick={() => setMilestoneMessage(null)}
+          >
+            <p className="text-sm font-semibold leading-snug text-amber-50">
+              {milestoneMessage}
+            </p>
+            <p className="mt-1 text-[10px] text-zinc-500">タップで閉じる</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
       {isOpen && (
         <>
           <motion.div
@@ -418,5 +451,6 @@ export default function CreatePostModal({
         </>
       )}
     </AnimatePresence>
+    </>
   );
 }
