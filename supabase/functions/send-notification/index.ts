@@ -22,9 +22,8 @@ const TABLES_HANDLED = new Set([
   "post_likes",
   "reply_likes",
   "band_role_applicants",
-  /** App schema uses `post_replies`; `comments` supported if you add that table with same shape. */
+  /** Threaded replies: `post_id`, `user_id`, `content`, optional `parent_id` → `post_replies.id`. */
   "post_replies",
-  "comments",
 ]);
 
 interface DbWebhookPayload {
@@ -253,6 +252,7 @@ async function fetchPostAuthorUserId(
   return typeof uid === "string" && uid.length > 0 ? uid : null;
 }
 
+/** `post_replies.user_id` for a given reply row (`id`). Used for reply likes and parent author. */
 async function fetchReplyAuthorUserId(
   supabase: SupabaseClient,
   replyId: string,
@@ -261,23 +261,6 @@ async function fetchReplyAuthorUserId(
     .from("post_replies")
     .select("user_id")
     .eq("id", replyId)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  const uid = (data as { user_id?: string }).user_id;
-  return typeof uid === "string" && uid.length > 0 ? uid : null;
-}
-
-/** Parent row author for threaded comments/replies (`comments` or `post_replies`). */
-async function fetchCommentRowAuthorUserId(
-  supabase: SupabaseClient,
-  table: "comments" | "post_replies",
-  rowId: string,
-): Promise<string | null> {
-  const { data, error } = await supabase
-    .from(table)
-    .select("user_id")
-    .eq("id", rowId)
     .maybeSingle();
 
   if (error || !data) return null;
@@ -328,42 +311,30 @@ type NotifyPlan =
     data?: Record<string, string>;
   };
 
-/** `parent_comment_id` (comments table) or `parent_id` (post_replies). */
-function parentCommentIdFromRecord(record: Record<string, unknown>): string | null {
-  return asNonEmptyString(record.parent_comment_id) ??
-    asNonEmptyString(record.parent_id);
-}
-
-function commentAuthorIdFromRecord(record: Record<string, unknown>): string | null {
-  return asNonEmptyString(record.user_id) ?? asNonEmptyString(record.author_id);
-}
-
-function commentBodyFromRecord(record: Record<string, unknown>): string {
-  const t = asNonEmptyString(record.content) ?? asNonEmptyString(record.body);
-  return truncateBody(t ?? "");
-}
-
-async function planCommentInsertNotification(
+/**
+ * INSERT on `post_replies`: notify post owner (top-level) or parent reply author (`parent_id`).
+ * Schema: `post_id` → `posts`, `user_id` = reply author, `content`, `parent_id` → parent `post_replies.id`.
+ */
+async function planPostReplyInsertNotification(
   supabase: SupabaseClient,
-  table: "comments" | "post_replies",
   record: Record<string, unknown>,
 ): Promise<{ plan: NotifyPlan | null; skipReason?: string }> {
   const postId = asNonEmptyString(record.post_id);
-  const authorId = commentAuthorIdFromRecord(record);
+  const authorId = asNonEmptyString(record.user_id);
   if (!postId) {
-    return { plan: null, skipReason: "comment missing post_id" };
+    return { plan: null, skipReason: "post_replies missing post_id" };
   }
   if (!authorId) {
-    return { plan: null, skipReason: "comment missing user_id" };
+    return { plan: null, skipReason: "post_replies missing user_id" };
   }
 
-  const parentId = parentCommentIdFromRecord(record);
+  const parentReplyId = asNonEmptyString(record.parent_id);
   let recipientId: string | null;
 
-  if (parentId) {
-    recipientId = await fetchCommentRowAuthorUserId(supabase, table, parentId);
+  if (parentReplyId) {
+    recipientId = await fetchReplyAuthorUserId(supabase, parentReplyId);
     if (!recipientId) {
-      return { plan: null, skipReason: "parent comment author not found" };
+      return { plan: null, skipReason: "parent post_replies row author not found" };
     }
   } else {
     recipientId = await fetchPostAuthorUserId(supabase, postId);
@@ -373,11 +344,12 @@ async function planCommentInsertNotification(
   }
 
   if (recipientId === authorId) {
-    return { plan: null, skipReason: "self-comment or self-reply" };
+    return { plan: null, skipReason: "self-reply (author is recipient)" };
   }
 
-  const title = parentId ? "返信が届きました" : "新着コメントがあります";
-  const body = commentBodyFromRecord(record) || "（内容なし）";
+  const title = parentReplyId ? "返信が届きました" : "新着コメントがあります";
+  const rawContent = asNonEmptyString(record.content);
+  const body = rawContent ? truncateBody(rawContent) : "（内容なし）";
 
   return {
     plan: {
@@ -488,10 +460,7 @@ async function planNotification(
     }
 
     case "post_replies":
-      return planCommentInsertNotification(supabase, "post_replies", record);
-
-    case "comments":
-      return planCommentInsertNotification(supabase, "comments", record);
+      return planPostReplyInsertNotification(supabase, record);
 
     default:
       return { plan: null, skipReason: "unknown table" };
