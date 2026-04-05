@@ -73,7 +73,7 @@ interface TimelineProps {
   refreshing?: boolean;
   /** When false, Timeline should pause audio but keep state/scroll intact. */
   isForeground?: boolean;
-  /** Set true after a confirmed user gesture (LockScreen tap, etc.). */
+  /** Legacy: App may set after lock unlock — timeline autoplay still requires a feed interaction. */
   hasUserGesture?: boolean;
   /** Restore scroll to a post when re-entering Timeline. */
   restorePostId?: string | null;
@@ -103,7 +103,7 @@ export default function Timeline({
   onRefresh,
   refreshing = false,
   isForeground = true,
-  hasUserGesture: hasUserGestureProp = false,
+  hasUserGesture: _hasUserGestureProp = false,
   restorePostId = null,
   onActivePostIdChange,
   openReplyForPostId = null,
@@ -149,7 +149,9 @@ export default function Timeline({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewProgress, setPreviewProgress] = useState(0);
-  const [hasUserGesture, setHasUserGesture] = useState(false);
+  /** True only after the user interacts with the scroll feed (not LockScreen / window chrome). */
+  const [timelinePlaybackPrimed, setTimelinePlaybackPrimed] = useState(false);
+  const timelinePlaybackPrimedRef = useRef(false);
   const [autoplayBlockedPostId, setAutoplayBlockedPostId] = useState<
     string | null
   >(null);
@@ -224,6 +226,12 @@ export default function Timeline({
 
   activePostIdRef.current = activePostId;
   isPlayingRef.current = isPlaying;
+  timelinePlaybackPrimedRef.current = timelinePlaybackPrimed;
+
+  const primeTimelinePlayback = useCallback(() => {
+    setTimelinePlaybackPrimed(true);
+    setAutoplayBlockedPostId(null);
+  }, []);
 
   useEffect(() => {
     onActivePostIdChange?.(activePostId);
@@ -237,11 +245,38 @@ export default function Timeline({
     setIsPlaying(false);
   }, [isForeground]);
 
+  /** Feed-only priming: LockScreen / App `hasUserGesture` must NOT unlock autoplay here. */
   useEffect(() => {
-    if (!hasUserGestureProp) return;
-    setHasUserGesture(true);
-    setAutoplayBlockedPostId(null);
-  }, [hasUserGestureProp]);
+    if (!isForeground || feedItems.length === 0) return;
+    const root = scrollRef.current;
+    if (!root) return;
+    const onFirstFeedTouch = () => {
+      primeTimelinePlayback();
+    };
+    root.addEventListener('pointerdown', onFirstFeedTouch, {
+      capture: true,
+      once: true,
+    });
+    root.addEventListener('touchstart', onFirstFeedTouch, {
+      capture: true,
+      once: true,
+      passive: true,
+    });
+    return () => {
+      root.removeEventListener('pointerdown', onFirstFeedTouch, {
+        capture: true,
+      });
+      root.removeEventListener('touchstart', onFirstFeedTouch, {
+        capture: true,
+      });
+    };
+  }, [
+    isForeground,
+    feedItems.length,
+    primeTimelinePlayback,
+    timelineRefreshTrigger,
+    seedRefreshNonce,
+  ]);
 
   useEffect(() => {
     if (!isForeground) return;
@@ -735,9 +770,9 @@ export default function Timeline({
   }, [activePostId, posts]);
 
   /**
-   * Self-healing IntersectionObserver: after SPA navigation / `display:none`, the root may
-   * have had zero size when nodes were first observed. Disconnect, wait 100ms, re-observe,
-   * then nudge scroll + resync `<audio>` to match `activePostId`.
+   * Self-healing IntersectionObserver: same path for first paint and return-from-SPA.
+   * Retries when the scroll root has no layout yet; avoids `resyncPlayback` until the feed
+   * is primed so the initial `<audio>` load stays owned by SpotifyPlayer’s layout effect.
    */
   useEffect(() => {
     ioObserverRef.current?.disconnect();
@@ -747,11 +782,21 @@ export default function Timeline({
 
     const ratios = new Map<Element, number>();
     let cancelled = false;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 40;
+    let timerId: number | undefined;
 
-    const timer = window.setTimeout(() => {
+    const attachOrRetry = () => {
       if (cancelled) return;
+      attempt += 1;
       const root = scrollRef.current;
-      if (!root || root.getBoundingClientRect().height < 2) return;
+      const h = root?.getBoundingClientRect().height ?? 0;
+      if (!root || h < 2) {
+        if (attempt < MAX_ATTEMPTS) {
+          timerId = window.setTimeout(attachOrRetry, 50);
+        }
+        return;
+      }
 
       ioObserverRef.current?.disconnect();
 
@@ -787,10 +832,15 @@ export default function Timeline({
         },
       );
 
+      const nodes = root.querySelectorAll('[data-timeline-post]');
+      if (nodes.length === 0 && attempt < MAX_ATTEMPTS) {
+        obs.disconnect();
+        timerId = window.setTimeout(attachOrRetry, 50);
+        return;
+      }
+
       ioObserverRef.current = obs;
-      root.querySelectorAll('[data-timeline-post]').forEach((el) => {
-        obs.observe(el);
-      });
+      nodes.forEach((el) => obs.observe(el));
 
       const pid = activePostIdRef.current?.trim();
       if (pid) {
@@ -799,37 +849,24 @@ export default function Timeline({
           ?.scrollIntoView({ behavior: 'auto', block: 'center' });
       }
 
-      const wantPlay = isPlayingRef.current;
-      void spotifyPlayerRef.current?.resyncPlayback(wantPlay).catch(() => {
-        if (wantPlay) setIsPlaying(false);
-      });
-    }, 100);
+      if (timelinePlaybackPrimedRef.current) {
+        const wantPlay = isPlayingRef.current;
+        void spotifyPlayerRef.current?.resyncPlayback(wantPlay).catch(() => {
+          if (wantPlay) setIsPlaying(false);
+        });
+      }
+    };
+
+    timerId = window.setTimeout(attachOrRetry, 100);
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      if (timerId !== undefined) window.clearTimeout(timerId);
       ioObserverRef.current?.disconnect();
       ioObserverRef.current = null;
       ratios.clear();
     };
   }, [isForeground, feedItems, focusTimelineFromScroll]);
-
-  // Autoplay is allowed only after a user gesture (browser policy).
-  useEffect(() => {
-    if (hasUserGesture) return;
-    const onFirstGesture = () => {
-      setHasUserGesture(true);
-      setAutoplayBlockedPostId(null);
-    };
-    window.addEventListener('pointerdown', onFirstGesture, { once: true });
-    window.addEventListener('keydown', onFirstGesture, { once: true });
-    window.addEventListener('touchstart', onFirstGesture, { once: true });
-    return () => {
-      window.removeEventListener('pointerdown', onFirstGesture);
-      window.removeEventListener('keydown', onFirstGesture);
-      window.removeEventListener('touchstart', onFirstGesture);
-    };
-  }, [hasUserGesture]);
 
   // TikTok-style: when the active post changes, attempt to start playback automatically.
   useEffect(() => {
@@ -858,8 +895,7 @@ export default function Timeline({
       return;
     }
 
-    if (!hasUserGesture) {
-      // Autoplay is not allowed until the user has interacted with the page.
+    if (!timelinePlaybackPrimed) {
       setAutoplayBlockedPostId(activePostId);
       setIsPlaying(false);
       setPreviewProgress(0);
@@ -890,7 +926,7 @@ export default function Timeline({
         autoplayDelayRef.current = null;
       }
     };
-  }, [activePostId, hasUserGesture, isForeground]);
+  }, [activePostId, timelinePlaybackPrimed, isForeground]);
 
   // If autoplay failed (SpotifyPlayer flips `playing` back to false), show a tap overlay.
   useEffect(() => {
@@ -1057,6 +1093,7 @@ export default function Timeline({
   };
 
   const handlePlayForPost = (post: Post) => {
+    primeTimelinePlayback();
     if (!post.previewUrl) return;
     if (post.id === activePostId && isPlaying) {
       setIsPlaying(false);
@@ -1416,10 +1453,12 @@ export default function Timeline({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
+                        primeTimelinePlayback();
                         setAutoplayBlockedPostId(null);
                         handlePlayForPost(post);
                       }}
                       className="pointer-events-auto rounded-full border border-emerald-400/35 bg-zinc-950/80 px-4 py-2 text-sm font-semibold text-emerald-200 shadow-lg shadow-emerald-500/10 backdrop-blur-md hover:bg-zinc-950"
+                      aria-label="Tap to start playback"
                     >
                       タップして再生
                     </button>
