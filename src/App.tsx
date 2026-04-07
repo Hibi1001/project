@@ -268,6 +268,62 @@ function App() {
 
   const userId = session?.user?.id ?? null;
 
+  /** Daily Vibes / deep links: `/?action=open_post_modal` opens the create-post modal. */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!passcodeOk || !authReady || !userId || profileGate !== 'ok') return;
+
+    const applyOpenPostModalFromUrl = () => {
+      let params: URLSearchParams;
+      try {
+        params = new URLSearchParams(window.location.search);
+      } catch {
+        return;
+      }
+      if (params.get('action') !== 'open_post_modal') return;
+      setCreatePostModalOpen(true);
+      setCurrentScreen('timeline');
+      params.delete('action');
+      const qs = params.toString();
+      const path = window.location.pathname + (qs ? `?${qs}` : '');
+      window.history.replaceState(null, '', path);
+    };
+
+    const onServiceWorkerMessage = (e: MessageEvent) => {
+      if (e.data?.type !== 'MYSSESSION_NAVIGATE' || typeof e.data.url !== 'string') {
+        return;
+      }
+      try {
+        const u = new URL(e.data.url, window.location.origin);
+        window.history.replaceState(null, '', u.pathname + u.search);
+        if (u.searchParams.get('action') === 'open_post_modal') {
+          setCreatePostModalOpen(true);
+          setCurrentScreen('timeline');
+        }
+      } catch {
+        /* ignore malformed URL */
+      }
+    };
+
+    applyOpenPostModalFromUrl();
+    window.addEventListener('popstate', applyOpenPostModalFromUrl);
+    window.addEventListener('focus', applyOpenPostModalFromUrl);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        applyOpenPostModalFromUrl();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('message', onServiceWorkerMessage);
+
+    return () => {
+      window.removeEventListener('popstate', applyOpenPostModalFromUrl);
+      window.removeEventListener('focus', applyOpenPostModalFromUrl);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('message', onServiceWorkerMessage);
+    };
+  }, [passcodeOk, authReady, userId, profileGate]);
+
   const FCM_SETUP_SESSION_KEY = 'mysession_fcm_setup_v1';
 
   // FCM: one attempt per browser tab (sessionStorage survives React Strict Mode remounts).

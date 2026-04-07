@@ -130,7 +130,25 @@ self.addEventListener('notificationclick', (event) => {
       for (let i = 0; i < clientList.length; i++) {
         const c = clientList[i];
         if (c.url.startsWith(self.location.origin) && 'focus' in c) {
-          return c.focus();
+          if (typeof c.navigate === 'function') {
+            return c
+              .navigate(targetUrl)
+              .then(() => c.focus())
+              .catch(() =>
+                c.focus().then(() => {
+                  c.postMessage({
+                    type: 'MYSSESSION_NAVIGATE',
+                    url: targetUrl,
+                  });
+                }),
+              );
+          }
+          return c.focus().then(() => {
+            c.postMessage({
+              type: 'MYSSESSION_NAVIGATE',
+              url: targetUrl,
+            });
+          });
         }
       }
       if (self.clients.openWindow) {

@@ -10,3 +10,10 @@ entrypoint = "./functions/send-notification/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-notification/*.html" ]
+
+[functions.daily-vibes]
+enabled = true
+# Cron / manual invoke: set DAILY_VIBES_CRON_SECRET and send Authorization: Bearer <secret>.
+verify_jwt = false
+import_map = "./functions/daily-vibes/deno.json"
+entrypoint = "./functions/daily-vibes/index.ts"
