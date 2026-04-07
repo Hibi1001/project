@@ -17,7 +17,7 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const MAX_BODY_LENGTH = 2000;
 
 const TABLES_HANDLED = new Set([
-  "posts",
+  /** `posts` INSERT: no global push (was spammy); in-app timeline only. */
   "band_projects",
   "post_likes",
   "reply_likes",
@@ -52,17 +52,6 @@ function asNonEmptyString(v: unknown): string | null {
 
 function truncateBody(s: string): string {
   return s.length <= MAX_BODY_LENGTH ? s : s.slice(0, MAX_BODY_LENGTH);
-}
-
-function buildPostNotificationBody(record: Record<string, unknown>): string {
-  const content = asNonEmptyString(record.content);
-  if (content) return truncateBody(content);
-  const title = asNonEmptyString(record.song_title) ?? "";
-  const artist = asNonEmptyString(record.artist_name) ?? "";
-  const cap = asNonEmptyString(record.caption);
-  const main = [title, artist].filter(Boolean).join(" — ");
-  const withCap = cap ? (main ? `${main}（${cap}）` : cap) : main;
-  return truncateBody(withCap || "新しい投稿");
 }
 
 function buildBandProjectNotificationBody(record: Record<string, unknown>): string {
@@ -116,16 +105,20 @@ async function getGoogleAccessToken(): Promise<string> {
  * while `onBackgroundMessage` also calls `showNotification` (duplicate banners).
  * Title/body are read in the client SW and in `onMessage` (foreground toast).
  */
-/** FCM `data` values must be strings. */
+/** FCM `data` values must be strings. Always include `click_action` for SW / clients. */
 function buildFcmDataPayload(
   title: string,
   body: string,
   extra?: Record<string, string>,
 ): Record<string, string> {
-  const out: Record<string, string> = { title, body };
+  const out: Record<string, string> = {
+    title: title.trim() || "マイセッション",
+    body: body.trim() || "タップしてアプリを開く",
+    click_action: "/",
+  };
   if (extra) {
     for (const [k, v] of Object.entries(extra)) {
-      if (typeof v === "string") out[k] = v;
+      if (typeof v === "string" && v.length > 0) out[k] = v;
     }
   }
   return out;
@@ -360,6 +353,7 @@ async function planPostReplyInsertNotification(
       data: {
         click_action: "/",
         post_id: postId,
+        kind: "post_reply",
       },
     },
   };
@@ -375,21 +369,16 @@ async function planNotification(
   }
 
   switch (table) {
-    case "posts":
-      return {
-        plan: {
-          mode: "broadcast",
-          title: "新着投稿",
-          body: buildPostNotificationBody(record),
-        },
-      };
-
     case "band_projects":
       return {
         plan: {
           mode: "broadcast",
           title: "新しいバンド募集",
           body: buildBandProjectNotificationBody(record),
+          data: {
+            click_action: "/",
+            kind: "band_project",
+          },
         },
       };
 
@@ -410,6 +399,11 @@ async function planNotification(
           title: "投稿にいいね！",
           body: "あなたの投稿が評価されました",
           userId: authorId,
+          data: {
+            click_action: "/",
+            post_id: postId,
+            kind: "post_like",
+          },
         },
       };
     }
@@ -433,6 +427,11 @@ async function planNotification(
           title: "返信にいいね！",
           body: "あなたの返信が評価されました",
           userId: authorId,
+          data: {
+            click_action: "/",
+            reply_id: replyId,
+            kind: "reply_like",
+          },
         },
       };
     }
@@ -455,6 +454,10 @@ async function planNotification(
           title: "バンド応募届きました！",
           body: "あなたの募集に新しい応募がありました",
           userId: ownerId,
+          data: {
+            click_action: "/",
+            kind: "band_applicant",
+          },
         },
       };
     }

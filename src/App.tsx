@@ -148,9 +148,11 @@ function App() {
   const [todaysPostCount, setTodaysPostCount] = useState(0);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   /** Foreground FCM: in-app toast only (no `new Notification()` — avoids duplicate with SW). */
-  const [fcmToast, setFcmToast] = useState<{ title: string; body: string } | null>(
-    null,
-  );
+  const [fcmToast, setFcmToast] = useState<{
+    title: string;
+    body: string;
+    id: string;
+  } | null>(null);
   const [timelineJumpPostId, setTimelineJumpPostId] = useState<string | null>(
     null,
   );
@@ -318,13 +320,19 @@ function App() {
     void (async () => {
       if (!(await isForegroundMessagingAvailable())) return;
       if (cancelled) return;
-      unsubscribe = subscribeForegroundFcmMessages(({ title, body }) => {
+      unsubscribe = subscribeForegroundFcmMessages(({ title, body, messageId }) => {
         // Foreground: in-app toast only (never `new Notification()`).
         if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
           return;
         }
         if (toastTimer) clearTimeout(toastTimer);
-        setFcmToast({ title, body });
+        const safeTitle = title.trim() || 'マイセッション';
+        const safeBody = body.trim() || 'タップして詳細を表示';
+        setFcmToast({
+          title: safeTitle,
+          body: safeBody,
+          id: messageId ?? `${safeTitle}:${safeBody}:${Date.now()}`,
+        });
         toastTimer = setTimeout(() => setFcmToast(null), 6500);
       });
     })();
@@ -666,7 +674,7 @@ function App() {
       <AnimatePresence>
         {fcmToast && (
           <motion.div
-            key={`${fcmToast.title}\0${fcmToast.body}`}
+            key={fcmToast.id}
             role="status"
             aria-live="polite"
             initial={{ opacity: 0, y: 20 }}

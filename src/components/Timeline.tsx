@@ -43,6 +43,23 @@ import SpotifyPlayer, {
 } from './SpotifyPlayer';
 import { DAILY_POST_LIMIT } from '../constants/posting';
 
+/** Supabase `created_at` ISO → relative Japanese label or `YYYY/MM/DD`. */
+function formatTimelinePostTimeJa(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const diffMs = Date.now() - t;
+  if (diffMs < 0) {
+    const d = new Date(t);
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  }
+  if (diffMs < 60_000) return 'たった今';
+  if (diffMs < 3600_000) return `${Math.floor(diffMs / 60_000)}分前`;
+  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3600_000)}時間前`;
+  if (diffMs < 7 * 86_400_000) return `${Math.floor(diffMs / 86_400_000)}日前`;
+  const d = new Date(t);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /** Soft fade + slide-up when a snap slide enters the viewport (framer-motion). */
 const timelineSlideEnterMotion = {
   initial: { opacity: 0, y: 22 },
@@ -1251,6 +1268,9 @@ export default function Timeline({
                       メンバー募集
                     </span>
                   </div>
+                  <p className="text-center text-xs font-medium text-zinc-500">
+                    {formatTimelinePostTimeJa(item.created_at)}
+                  </p>
                   <div className="flex w-full flex-col items-center gap-2.5 text-center sm:gap-3">
                     <div className="flex w-full max-w-md items-start justify-between gap-2">
                       <h2 className="min-w-0 flex-1 text-balance text-2xl font-bold leading-tight text-zinc-50 sm:text-3xl">
@@ -1518,6 +1538,9 @@ export default function Timeline({
                     </h2>
                     <p className="text-balance text-lg leading-snug text-zinc-400 sm:text-xl">
                       {post.artist}
+                    </p>
+                    <p className="text-xs font-medium text-zinc-500">
+                      {formatTimelinePostTimeJa(item.created_at)}
                     </p>
                     {post.caption?.trim() ? (
                       <p className="mt-1 flex max-w-sm items-start justify-center gap-1.5 px-2 text-sm italic leading-snug text-zinc-400/90">

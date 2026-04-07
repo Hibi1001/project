@@ -40,14 +40,15 @@ export function subscribeForegroundFcmMessages(
     const d = payload.data;
     const title =
       (typeof d?.title === 'string' && d.title.trim()) ||
-      payload.notification?.title ||
-      '通知';
-    const body =
-      (typeof d?.body === 'string' && d.body) ||
-      payload.notification?.body ||
+      payload.notification?.title?.trim() ||
+      'マイセッション';
+    const rawBody =
+      (typeof d?.body === 'string' && d.body.trim()) ||
+      payload.notification?.body?.trim() ||
       '';
+    const body = rawBody || 'タップして詳細を表示';
     handler({
-      title,
+      title: title || 'マイセッション',
       body,
       messageId: payload.messageId,
     });
