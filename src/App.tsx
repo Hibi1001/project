@@ -29,7 +29,15 @@ import { DAILY_POST_LIMIT } from './constants/posting';
 import type { Session } from '@supabase/supabase-js';
 import { RotateCw } from 'lucide-react';
 
-console.log("Hello from the top of App.tsx!");
+console.log('App starting...');
+if (typeof window !== 'undefined') {
+  try {
+    console.log('URL:', window.location.href);
+  } catch {
+    /* LINE / restricted WebViews may throw on location access */
+  }
+}
+
 type Screen = 'lock' | 'timeline' | 'board' | 'profile' | 'notifications';
 
 const HAS_SEEN_WELCOME_KEY = 'mysession_has_seen_welcome_v1';
@@ -173,6 +181,32 @@ function App() {
     items: FeedItem[] | null;
   }>({ loading: false, items: null });
 
+  /** Temporary: `?reset=true` clears storage (debug corrupted state / LINE WebView). */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('reset') !== 'true') return;
+      try {
+        window.localStorage.clear();
+      } catch (e) {
+        console.warn('[App] localStorage.clear failed', e);
+      }
+      try {
+        window.sessionStorage.clear();
+      } catch (e) {
+        console.warn('[App] sessionStorage.clear failed', e);
+      }
+      params.delete('reset');
+      const qs = params.toString();
+      const next = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', next);
+      window.location.reload();
+    } catch (e) {
+      console.error('[App] ?reset=true handler failed', e);
+    }
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const mq = window.matchMedia('(orientation: landscape)');
@@ -274,65 +308,88 @@ function App() {
     if (!passcodeOk || !authReady || !userId || profileGate !== 'ok') return;
 
     const applyOpenPostModalFromUrl = () => {
-      let params: URLSearchParams;
       try {
-        params = new URLSearchParams(window.location.search);
-      } catch {
-        return;
+        let params: URLSearchParams;
+        try {
+          params = new URLSearchParams(window.location.search);
+        } catch (inner) {
+          console.error('[App] URLSearchParams(open_post_modal):', inner);
+          return;
+        }
+        if (params.get('action') !== 'open_post_modal') return;
+        setCreatePostModalOpen(true);
+        setCurrentScreen('timeline');
+        params.delete('action');
+        const qs = params.toString();
+        const path = window.location.pathname + (qs ? `?${qs}` : '');
+        window.history.replaceState(null, '', path);
+      } catch (err) {
+        console.error('[App] applyOpenPostModalFromUrl failed:', err);
       }
-      if (params.get('action') !== 'open_post_modal') return;
-      setCreatePostModalOpen(true);
-      setCurrentScreen('timeline');
-      params.delete('action');
-      const qs = params.toString();
-      const path = window.location.pathname + (qs ? `?${qs}` : '');
-      window.history.replaceState(null, '', path);
     };
 
     const onServiceWorkerMessage = (e: MessageEvent) => {
-      if (e.data?.type !== 'MYSSESSION_NAVIGATE' || typeof e.data.url !== 'string') {
-        return;
-      }
       try {
+        if (e.data?.type !== 'MYSSESSION_NAVIGATE' || typeof e.data.url !== 'string') {
+          return;
+        }
         const u = new URL(e.data.url, window.location.origin);
         window.history.replaceState(null, '', u.pathname + u.search);
         if (u.searchParams.get('action') === 'open_post_modal') {
           setCreatePostModalOpen(true);
           setCurrentScreen('timeline');
         }
-      } catch {
-        /* ignore malformed URL */
+      } catch (err) {
+        console.error('[App] onServiceWorkerMessage (open_post_modal):', err);
       }
     };
 
-    applyOpenPostModalFromUrl();
-    window.addEventListener('popstate', applyOpenPostModalFromUrl);
-    window.addEventListener('focus', applyOpenPostModalFromUrl);
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        applyOpenPostModalFromUrl();
+      try {
+        if (document.visibilityState === 'visible') {
+          applyOpenPostModalFromUrl();
+        }
+      } catch (err) {
+        console.error('[App] visibilitychange (open_post_modal):', err);
       }
     };
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('message', onServiceWorkerMessage);
+
+    try {
+      applyOpenPostModalFromUrl();
+      window.addEventListener('popstate', applyOpenPostModalFromUrl);
+      window.addEventListener('focus', applyOpenPostModalFromUrl);
+      document.addEventListener('visibilitychange', onVisibility);
+      window.addEventListener('message', onServiceWorkerMessage);
+    } catch (err) {
+      console.error('[App] open_post_modal effect setup failed:', err);
+    }
 
     return () => {
-      window.removeEventListener('popstate', applyOpenPostModalFromUrl);
-      window.removeEventListener('focus', applyOpenPostModalFromUrl);
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('message', onServiceWorkerMessage);
+      try {
+        window.removeEventListener('popstate', applyOpenPostModalFromUrl);
+        window.removeEventListener('focus', applyOpenPostModalFromUrl);
+        document.removeEventListener('visibilitychange', onVisibility);
+        window.removeEventListener('message', onServiceWorkerMessage);
+      } catch (err) {
+        console.error('[App] open_post_modal effect cleanup failed:', err);
+      }
     };
   }, [passcodeOk, authReady, userId, profileGate]);
 
   const FCM_SETUP_SESSION_KEY = 'mysession_fcm_setup_v1';
 
   // FCM: one attempt per browser tab (sessionStorage survives React Strict Mode remounts).
+  // All work is async inside setupNotifications — never blocks React’s render path.
   useEffect(() => {
     if (!userId || !passcodeOk || !authReady || profileGate !== 'ok') return;
     if (currentScreen === 'lock') return;
     if (typeof window === 'undefined') return;
-    if (window.sessionStorage.getItem(FCM_SETUP_SESSION_KEY) === '1') return;
-    window.sessionStorage.setItem(FCM_SETUP_SESSION_KEY, '1');
+    try {
+      if (window.sessionStorage.getItem(FCM_SETUP_SESSION_KEY) === '1') return;
+      window.sessionStorage.setItem(FCM_SETUP_SESSION_KEY, '1');
+    } catch (e) {
+      console.warn('[App] FCM sessionStorage flag skipped:', e);
+    }
 
     // デバッグ用（実際のリクエストはログイン・パスコード・プロフィール準備完了後に一度だけ）
     console.log(
@@ -374,23 +431,27 @@ function App() {
     let cancelled = false;
 
     void (async () => {
-      if (!(await isForegroundMessagingAvailable())) return;
-      if (cancelled) return;
-      unsubscribe = subscribeForegroundFcmMessages(({ title, body, messageId }) => {
-        // Foreground: in-app toast only (never `new Notification()`).
-        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-          return;
-        }
-        if (toastTimer) clearTimeout(toastTimer);
-        const safeTitle = title.trim() || 'マイセッション';
-        const safeBody = body.trim() || 'タップして詳細を表示';
-        setFcmToast({
-          title: safeTitle,
-          body: safeBody,
-          id: messageId ?? `${safeTitle}:${safeBody}:${Date.now()}`,
+      try {
+        if (!(await isForegroundMessagingAvailable())) return;
+        if (cancelled) return;
+        unsubscribe = subscribeForegroundFcmMessages(({ title, body, messageId }) => {
+          // Foreground: in-app toast only (never `new Notification()`).
+          if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+            return;
+          }
+          if (toastTimer) clearTimeout(toastTimer);
+          const safeTitle = title.trim() || 'マイセッション';
+          const safeBody = body.trim() || 'タップして詳細を表示';
+          setFcmToast({
+            title: safeTitle,
+            body: safeBody,
+            id: messageId ?? `${safeTitle}:${safeBody}:${Date.now()}`,
+          });
+          toastTimer = setTimeout(() => setFcmToast(null), 6500);
         });
-        toastTimer = setTimeout(() => setFcmToast(null), 6500);
-      });
+      } catch (err) {
+        console.error('[App] FCM foreground subscribe failed:', err);
+      }
     })();
 
     return () => {

@@ -5,6 +5,7 @@ import {
   isSupported,
   onMessage,
   type MessagePayload,
+  type Messaging,
 } from 'firebase/messaging';
 
 const firebaseConfig = {
@@ -21,12 +22,33 @@ const VAPID_KEY =
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-/** クライアント専用。このモジュールはブラウザからのみ import すること。 */
-export const messaging = getMessaging(app);
+/**
+ * Lazy `getMessaging` so unsupported / restricted WebViews (e.g. LINE in-app) never throw
+ * at module load — that would blank-screen the whole app before React mounts.
+ */
+let messagingInstance: Messaging | null | undefined;
+
+function getMessagingLazy(): Messaging | null {
+  if (typeof window === 'undefined') return null;
+  if (messagingInstance === null) return null;
+  if (messagingInstance !== undefined) return messagingInstance;
+  try {
+    messagingInstance = getMessaging(app);
+    return messagingInstance;
+  } catch (e) {
+    console.warn('[firebase] getMessaging failed (environment may not support FCM):', e);
+    messagingInstance = null;
+    return null;
+  }
+}
 
 export async function isForegroundMessagingAvailable(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
-  return isSupported();
+  try {
+    return await isSupported();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -36,6 +58,10 @@ export async function isForegroundMessagingAvailable(): Promise<boolean> {
 export function subscribeForegroundFcmMessages(
   handler: (payload: { title: string; body: string; messageId?: string }) => void,
 ): () => void {
+  const messaging = getMessagingLazy();
+  if (!messaging) {
+    return () => {};
+  }
   return onMessage(messaging, (payload: MessagePayload) => {
     const d = payload.data;
     const title =
@@ -83,6 +109,11 @@ export async function requestForToken(): Promise<string | null> {
       '/firebase-messaging-sw.js',
     );
     await navigator.serviceWorker.ready;
+
+    const messaging = getMessagingLazy();
+    if (!messaging) {
+      return null;
+    }
 
     const currentToken = await getToken(messaging, {
       vapidKey: VAPID_KEY,
