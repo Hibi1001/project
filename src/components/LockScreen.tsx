@@ -57,17 +57,16 @@ export default function LockScreen({
         </motion.div>
 
         <h1 className="text-3xl font-bold text-zinc-50 mb-4">
-          今日の音楽を
+          Good band makes
           <br />
-          シェアしよう
+          Good bond
         </h1>
 
         <p className="text-zinc-300 mb-3 text-sm font-medium leading-relaxed">
-          音楽を楽しもう！今は制限なしで好きなだけ投稿できるフェス期間中だよ。
+          あなたの「今」は誰かに響く。多分。
         </p>
         <p className="text-zinc-500 mb-8 text-xs leading-relaxed">
-          Enjoy the launch: share as many tracks as you like — no daily cap right
-          now.
+          My session
         </p>
 
         <div className="w-full space-y-3">
@@ -88,7 +87,7 @@ export default function LockScreen({
               onClick={onViewTimelineOnly}
               className="w-full rounded-full border border-zinc-600/80 bg-zinc-800/40 py-3 px-6 text-sm font-medium text-zinc-200 backdrop-blur-md transition-colors hover:border-zinc-500/70 hover:bg-zinc-800/60"
             >
-              先にタイムラインだけ見る
+              みんなの投稿を見る
             </button>
           ) : null}
         </div>
