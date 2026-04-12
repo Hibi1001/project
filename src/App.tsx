@@ -931,7 +931,7 @@ function App() {
                   value={createBandName}
                   onChange={(e) => setCreateBandName(e.target.value)}
                   className="w-full rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/40"
-                  placeholder="例：メロパン研究会"
+                  placeholder="例：never young beach"
                 />
               </div>
               <div>
@@ -942,7 +942,7 @@ function App() {
                   value={createBandDesc}
                   onChange={(e) => setCreateBandDesc(e.target.value)}
                   className="min-h-[88px] w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/40"
-                  placeholder="やりたい曲、活動頻度など"
+                  placeholder="やりたい曲、どのライブか等"
                 />
               </div>
               <div>
