@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import LoadingSpinner from './LoadingSpinner';
-import {
-  fetchApplicantsForRole,
-  removeApplicantFromProjectRole,
-  updateApplicantStatus,
-  type RoleApplicantRow,
-} from '../lib/profileBandRecruitment';
+import { fetchApplicantsForRole, type RoleApplicantRow } from '../lib/profileBandRecruitment';
 
 type ApplicantListProps = {
   roleId: string;
@@ -24,7 +19,6 @@ export default function ApplicantList({
 }: ApplicantListProps) {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<RoleApplicantRow[]>([]);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -46,52 +40,6 @@ export default function ApplicantList({
   useEffect(() => {
     void load();
   }, [load]);
-
-  const handleAccept = useCallback(async (row: RoleApplicantRow) => {
-    const key = `${row.roleId}:${row.userId}:accept`;
-    setBusyKey(key);
-    setError(null);
-    try {
-      const ok = await updateApplicantStatus(row.roleId, row.userId, 'accepted');
-      if (!ok) {
-        setError('承認に失敗しました。');
-        return;
-      }
-      setRows((prev) =>
-        prev.map((x) =>
-          x.roleId === row.roleId && x.userId === row.userId
-            ? { ...x, status: 'accepted' }
-            : x,
-        ),
-      );
-    } catch (e) {
-      console.error('[ApplicantList] accept', e);
-      setError('承認に失敗しました。');
-    } finally {
-      setBusyKey(null);
-    }
-  }, []);
-
-  const handleDecline = useCallback(async (row: RoleApplicantRow) => {
-    const key = `${row.roleId}:${row.userId}:decline`;
-    setBusyKey(key);
-    setError(null);
-    try {
-      const ok = await removeApplicantFromProjectRole(row.roleId, row.userId);
-      if (!ok) {
-        setError('辞退処理に失敗しました。');
-        return;
-      }
-      setRows((prev) =>
-        prev.filter((x) => !(x.roleId === row.roleId && x.userId === row.userId)),
-      );
-    } catch (e) {
-      console.error('[ApplicantList] decline', e);
-      setError('辞退処理に失敗しました。');
-    } finally {
-      setBusyKey(null);
-    }
-  }, []);
 
   const handleOpenProfile = useCallback(
     (userId: string) => {
@@ -143,10 +91,6 @@ export default function ApplicantList({
       ) : (
         <div className="space-y-2">
           {rows.map((row) => {
-            const acceptKey = `${row.roleId}:${row.userId}:accept`;
-            const declineKey = `${row.roleId}:${row.userId}:decline`;
-            const accepting = busyKey === acceptKey;
-            const declining = busyKey === declineKey;
             const rowKey = `${row.roleId}:${row.userId || 'unknown-user'}`;
             return (
               <div
@@ -177,40 +121,6 @@ export default function ApplicantList({
                     </p>
                   </div>
                 </button>
-                {row.status === 'accepted' ? (
-                  <span
-                    className="h-2.5 w-2.5 rounded-full bg-emerald-400"
-                    title="Accepted"
-                  />
-                ) : null}
-                {mode === 'manage' ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={accepting || declining || row.status === 'accepted'}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void handleAccept(row);
-                      }}
-                      className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-                    >
-                      {row.status === 'accepted' ? 'Accepted' : accepting ? '...' : 'Accept'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={accepting || declining}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void handleDecline(row);
-                      }}
-                      className="rounded-lg border border-zinc-600 px-2.5 py-1 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                    >
-                      {declining ? '...' : 'Decline'}
-                    </button>
-                  </>
-                ) : null}
               </div>
             );
           })}
