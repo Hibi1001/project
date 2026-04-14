@@ -11,6 +11,33 @@ export type ApplicantPreview = {
   avatar: string;
 };
 
+export type ApplicantStatus = 'pending' | 'accepted' | 'declined';
+
+export type ProjectApplicantRow = {
+  roleId: string;
+  userId: string;
+  displayName: string;
+  avatarUrl: string;
+  roleLabel: string;
+  status: ApplicantStatus;
+};
+
+export type RoleApplicantRow = {
+  roleId: string;
+  userId: string;
+  displayName: string;
+  avatarUrl: string;
+  status: ApplicantStatus;
+};
+
+const ROLE_LABEL_BY_TYPE: Record<InstrumentType, string> = {
+  vocal: 'Vocal',
+  guitar: 'Guitar',
+  bass: 'Bass',
+  drum: 'Drums',
+  keyboard: 'Keyboard',
+};
+
 /** Load all band projects for the profile being viewed, with roles and applicant previews. */
 export async function fetchBandProjectsForOwner(
   ownerUserId: string,
@@ -156,4 +183,153 @@ export async function claimBandRole(roleId: string): Promise<{
     return { ok: false, error: error.message };
   }
   return { ok: true };
+}
+
+export async function fetchApplicantsForOwnerProject(
+  projectId: string,
+): Promise<ProjectApplicantRow[]> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id;
+    if (!uid) return [];
+
+    const { data: ownerRow, error: ownerError } = await supabase
+      .from('band_projects')
+      .select('id')
+      .eq('id', projectId)
+      .eq('owner_id', uid)
+      .maybeSingle();
+    if (ownerError || !ownerRow) {
+      if (ownerError) console.error('[band_projects] owner check', ownerError);
+      return [];
+    }
+
+    const { data, error } = await supabase
+      .from('band_role_applicants')
+      .select(
+        'role_id, user_id, status, band_roles!inner(project_id, instrument_type), users(id, display_name, avatar_url)',
+      )
+      .eq('band_roles.project_id', projectId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[band_role_applicants] owner project fetch', error);
+      return [];
+    }
+
+    const rows: ProjectApplicantRow[] = [];
+    for (const row of (data ?? []) as Array<{
+      role_id: string | null;
+      user_id: string | null;
+      status?: string | null;
+      band_roles?: { project_id?: string | null; instrument_type?: InstrumentType | null }[] | null;
+      users?: { id?: string | null; display_name?: string | null; avatar_url?: string | null } | null;
+    }>) {
+      const roleId = String(row.role_id ?? '').trim();
+      const userId = String(row.user_id ?? '').trim();
+      if (!roleId || !userId) continue;
+      const role = Array.isArray(row.band_roles) ? row.band_roles[0] : row.band_roles;
+      const inst = (role?.instrument_type ?? 'vocal') as InstrumentType;
+      const rawStatus = String(row.status ?? 'pending').toLowerCase();
+      const status: ApplicantStatus =
+        rawStatus === 'accepted' || rawStatus === 'declined' ? rawStatus : 'pending';
+      rows.push({
+        roleId,
+        userId,
+        displayName: String(row.users?.display_name ?? '').trim() || 'ユーザー',
+        avatarUrl: String(row.users?.avatar_url ?? '').trim(),
+        roleLabel: ROLE_LABEL_BY_TYPE[inst],
+        status,
+      });
+    }
+    return rows;
+  } catch (e) {
+    console.error('[fetchApplicantsForOwnerProject]', e);
+    return [];
+  }
+}
+
+export async function updateApplicantStatus(
+  roleId: string,
+  userId: string,
+  status: ApplicantStatus,
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('band_role_applicants')
+      .update({ status })
+      .eq('role_id', roleId)
+      .eq('user_id', userId);
+    if (error) {
+      console.error('[updateApplicantStatus]', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[updateApplicantStatus]', e);
+    return false;
+  }
+}
+
+export async function removeApplicantFromProjectRole(
+  roleId: string,
+  userId: string,
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('band_role_applicants')
+      .delete()
+      .eq('role_id', roleId)
+      .eq('user_id', userId);
+    if (error) {
+      console.error('[removeApplicantFromProjectRole]', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[removeApplicantFromProjectRole]', e);
+    return false;
+  }
+}
+
+export async function fetchApplicantsForRole(
+  roleId: string,
+): Promise<RoleApplicantRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from('band_role_applicants')
+      .select('role_id, user_id, status, users(id, display_name, avatar_url)')
+      .eq('role_id', roleId)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error('[fetchApplicantsForRole]', error);
+      return [];
+    }
+
+    const rows: RoleApplicantRow[] = [];
+    for (const row of (data ?? []) as Array<{
+      role_id: string | null;
+      user_id: string | null;
+      status?: string | null;
+      users?: { id?: string | null; display_name?: string | null; avatar_url?: string | null } | null;
+    }>) {
+      const rid = String(row.role_id ?? '').trim();
+      const uid = String(row.user_id ?? '').trim();
+      if (!rid || !uid) continue;
+      const rawStatus = String(row.status ?? 'pending').toLowerCase();
+      const status: ApplicantStatus =
+        rawStatus === 'accepted' || rawStatus === 'declined' ? rawStatus : 'pending';
+      rows.push({
+        roleId: rid,
+        userId: uid,
+        displayName: String(row.users?.display_name ?? '').trim() || 'ユーザー',
+        avatarUrl: String(row.users?.avatar_url ?? '').trim(),
+        status,
+      });
+    }
+    return rows;
+  } catch (e) {
+    console.error('[fetchApplicantsForRole]', e);
+    return [];
+  }
 }

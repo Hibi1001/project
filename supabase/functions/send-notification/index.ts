@@ -397,7 +397,7 @@ async function planNotification(
         plan: {
           mode: "targeted",
           title: "投稿にいいね！",
-          body: "あなたの投稿が評価されました",
+          body: "あなたの投稿がいいねされました",
           userId: authorId,
           data: {
             click_action: "/",
@@ -425,7 +425,7 @@ async function planNotification(
         plan: {
           mode: "targeted",
           title: "返信にいいね！",
-          body: "あなたの返信が評価されました",
+          body: "あなたの返信がいいねされました",
           userId: authorId,
           data: {
             click_action: "/",

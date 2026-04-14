@@ -27,6 +27,7 @@ import {
   type BandProjectWithRoles,
 } from '../lib/profileBandRecruitment';
 import { supabase } from '../lib/supabase';
+import ApplicantList from './ApplicantList';
 
 const INSTRUMENTS: InstrumentType[] = [
   'vocal',
@@ -80,6 +81,9 @@ export default function ProfileBandRecruitment({
   const [claimBusyId, setClaimBusyId] = useState<string | null>(null);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [openApplicantListRoleId, setOpenApplicantListRoleId] = useState<string | null>(
+    null,
+  );
 
   const projectIdsRef = useRef<Set<string>>(new Set());
 
@@ -222,9 +226,17 @@ export default function ProfileBandRecruitment({
     setClaimBusyId(role.id);
     try {
       if (!isMine) {
-        const { error } = await supabase
-          .from('band_role_applicants')
-          .insert({ role_id: role.id, user_id: authUserId });
+        let error: { message?: string } | null = null;
+        try {
+          const res = await supabase
+            .from('band_role_applicants')
+            .insert({ role_id: role.id, user_id: authUserId, status: 'pending' });
+          error = res.error;
+        } catch (e) {
+          console.error('[ProfileBandRecruitment] apply', e);
+          setToast('応募に失敗しました。');
+          return;
+        }
         if (error) {
           console.error(error);
           setToast(error.message ?? '応募に失敗しました。');
@@ -245,11 +257,19 @@ export default function ProfileBandRecruitment({
           });
         }
       } else {
-        const { error } = await supabase
-          .from('band_role_applicants')
-          .delete()
-          .eq('role_id', role.id)
-          .eq('user_id', authUserId);
+        let error: { message?: string } | null = null;
+        try {
+          const res = await supabase
+            .from('band_role_applicants')
+            .delete()
+            .eq('role_id', role.id)
+            .eq('user_id', authUserId);
+          error = res.error;
+        } catch (e) {
+          console.error('[ProfileBandRecruitment] unapply', e);
+          setToast('取り消しに失敗しました。');
+          return;
+        }
         if (error) {
           console.error(error);
           setToast(error.message ?? '取り消しに失敗しました。');
@@ -313,15 +333,17 @@ export default function ProfileBandRecruitment({
                   {proj.band_name}
                 </h4>
                 {authUserId && proj.owner_id === authUserId ? (
-                  <button
-                    type="button"
-                    disabled={deleteBusyId === proj.id}
-                    onClick={(e) => void handleDeleteProject(proj, e)}
-                    className="shrink-0 rounded-lg border border-zinc-700/80 bg-zinc-800/60 p-2 text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
-                    aria-label="募集を削除"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={deleteBusyId === proj.id}
+                      onClick={(e) => void handleDeleteProject(proj, e)}
+                      className="shrink-0 rounded-lg border border-zinc-700/80 bg-zinc-800/60 p-2 text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+                      aria-label="募集を削除"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 ) : null}
               </div>
               {proj.description ? (
@@ -339,63 +361,69 @@ export default function ProfileBandRecruitment({
                     Boolean(authUserId) && proj.owner_id === authUserId;
                   const roleApplicants = applicantsByRoleId[role.id] ?? [];
                   const isMine = Boolean(authUserId) && roleApplicants.some((a) => a.id === authUserId);
-                  const disabled = claimBusyId === role.id || isOwner;
+                  const iconDisabled = claimBusyId === role.id || isOwner;
+                  const listOpen = openApplicantListRoleId === role.id;
 
                   return (
-                    <button
+                    <div
                       key={role.id}
-                      type="button"
-                      disabled={disabled}
-                      onClick={(e) => void handleBandRoleClick(proj, role, e)}
-                      className={`group relative flex min-w-[4.5rem] flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 transition-all ${
-                        isOwner
-                          ? 'cursor-default border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-80'
-                          : isMine
-                            ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
-                            : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
-                      } disabled:opacity-50`}
-                      title={
-                        isOwner
-                          ? '自分の募集'
-                          : authUserId
-                            ? isMine
-                              ? 'タップで応募を取り消す'
-                              : 'このパートで参加したい（タップ）'
-                            : 'タップでログインの案内'
-                      }
+                      className={`overflow-hidden rounded-xl border ${
+                        isMine
+                          ? 'border-emerald-500/40 bg-zinc-900/80'
+                          : 'border-zinc-700/80 bg-zinc-950/70'
+                      }`}
                     >
-                      <div
-                        className="relative flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-xl bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50"
-                      >
-                        <Icon
-                          className={`h-6 w-6 ${
+                      <div className="flex items-stretch">
+                        <button
+                          type="button"
+                          disabled={iconDisabled}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void handleBandRoleClick(proj, role, e);
+                          }}
+                          className={`flex h-11 w-11 items-center justify-center border-r border-zinc-700/80 ${
+                            isMine
+                              ? 'bg-emerald-500/10 text-emerald-300 shadow-[0_0_0.6rem_rgba(16,185,129,0.3)]'
+                              : 'bg-zinc-950/80 text-amber-300 hover:bg-zinc-900'
+                          } disabled:opacity-50`}
+                          title={
                             isOwner
-                              ? 'text-zinc-500'
+                              ? '自分の募集'
                               : isMine
-                                ? 'text-emerald-400/95'
-                                : 'text-amber-400/90 group-hover:text-amber-300'
+                                ? '応募を取り消す'
+                                : '応募する'
+                          }
+                        >
+                          <Icon className="h-5 w-5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setOpenApplicantListRoleId((prev) =>
+                              prev === role.id ? null : role.id,
+                            );
+                          }}
+                          className={`min-w-[7.5rem] px-3 text-left text-xs font-semibold transition-colors ${
+                            listOpen
+                              ? 'bg-zinc-800 text-zinc-100'
+                              : 'bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/70'
                           }`}
+                          aria-expanded={listOpen}
+                        >
+                          {INSTRUMENT_LABEL[role.instrument_type]} ({roleApplicants.length})
+                        </button>
+                      </div>
+                      {listOpen ? (
+                        <ApplicantList
+                          roleId={role.id}
+                          isOpen={listOpen}
+                          mode={isOwner ? 'manage' : 'view'}
                         />
-                      </div>
-                      <div className="flex -space-x-2">
-                        {roleApplicants.slice(0, 3).map((a) => (
-                          <img
-                            key={a.id}
-                            src={
-                              a.avatar?.trim()
-                                ? a.avatar
-                                : 'https://placehold.co/32x32/27272a/a1a1aa?text=?'
-                            }
-                            alt=""
-                            className="h-5 w-5 rounded-full object-cover ring-2 ring-zinc-950"
-                          />
-                        ))}
-                      </div>
-                      <span className="text-[10px] font-medium text-zinc-500">
-                        {isOwner ? '募集中' : isMine ? '応募済み' : '応募'}
-                        {roleApplicants.length > 0 ? ` · ${roleApplicants.length}` : ''}
-                      </span>
-                    </button>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>
@@ -406,20 +434,23 @@ export default function ProfileBandRecruitment({
 
       <AnimatePresence>
         {createOpen ? (
-          <>
+          <motion.div
+            key="profile-band-create-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60]"
+          >
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
               onClick={() => !submitting && setCreateOpen(false)}
-              aria-hidden
+              aria-hidden="true"
             />
             <motion.div
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
-              className="fixed inset-0 z-[60] flex items-end justify-center p-4 sm:items-center"
+              className="absolute inset-0 flex items-end justify-center p-4 sm:items-center"
             >
               <div
                 role="dialog"
@@ -515,7 +546,7 @@ export default function ProfileBandRecruitment({
                 </form>
               </div>
             </motion.div>
-          </>
+          </motion.div>
         ) : null}
       </AnimatePresence>
 

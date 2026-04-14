@@ -6,7 +6,6 @@ import {
   useState,
   type ComponentType,
   type MouseEvent,
-  type ReactNode,
 } from 'react';
 import {
   Drum,
@@ -22,6 +21,7 @@ import { supabase } from '../lib/supabase';
 import Navbar from './Navbar';
 import LoadingSpinner from './LoadingSpinner';
 import UserSearch from './UserSearch';
+import ApplicantList from './ApplicantList';
 
 const INSTRUMENTS: InstrumentType[] = [
   'vocal',
@@ -110,8 +110,6 @@ export default function BandBoard({
   const [applicantRoleModalRoleId, setApplicantRoleModalRoleId] = useState<
     string | null
   >(null);
-  const [applicantRoleModalTitle, setApplicantRoleModalTitle] = useState('');
-  const pressStartByRoleIdRef = useRef<Record<string, number>>({});
 
   const projectIdsRef = useRef<Set<string>>(new Set());
 
@@ -236,7 +234,7 @@ export default function BandBoard({
 
   const handleBandRoleClick = useCallback(
     async (
-      projectId: string,
+      _projectId: string,
       ownerId: string,
       role: (typeof projects)[number]['roles'][number],
       e: MouseEvent<HTMLElement>,
@@ -252,9 +250,17 @@ export default function BandBoard({
       setBusyRoleId(role.id);
       try {
         if (!isMine) {
-          const { error } = await supabase
-            .from('band_role_applicants')
-            .insert({ role_id: role.id, user_id: authUserId });
+          let error: { message?: string } | null = null;
+          try {
+            const res = await supabase
+              .from('band_role_applicants')
+              .insert({ role_id: role.id, user_id: authUserId, status: 'pending' });
+            error = res.error;
+          } catch (inner) {
+            console.error('[BandBoard] apply', inner);
+            window.alert('応募に失敗しました。しばらくしてから再度お試しください。');
+            return;
+          }
           if (error) {
             console.error('[BandBoard] apply', error);
             window.alert(
@@ -274,11 +280,19 @@ export default function BandBoard({
             };
           });
         } else {
-          const { error } = await supabase
-            .from('band_role_applicants')
-            .delete()
-            .eq('role_id', role.id)
-            .eq('user_id', authUserId);
+          let error: { message?: string } | null = null;
+          try {
+            const res = await supabase
+              .from('band_role_applicants')
+              .delete()
+              .eq('role_id', role.id)
+              .eq('user_id', authUserId);
+            error = res.error;
+          } catch (inner) {
+            console.error('[BandBoard] unapply', inner);
+            window.alert('取り消しに失敗しました。しばらくしてから再度お試しください。');
+            return;
+          }
           if (error) {
             console.error('[BandBoard] unapply', error);
             window.alert(
@@ -299,17 +313,6 @@ export default function BandBoard({
     [authUserId, applicantsByRoleId],
   );
 
-  const openApplicantProfile = useCallback(
-    (e: MouseEvent, userId: string) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const id = userId.trim();
-      if (!id) return;
-      onViewProfile(id);
-    },
-    [onViewProfile],
-  );
-
   const openAuthorProfile = useCallback(
     (e: MouseEvent, ownerId: string) => {
       e.preventDefault();
@@ -321,11 +324,10 @@ export default function BandBoard({
   );
 
   const openRoleApplicantsModal = useCallback(
-    (e: MouseEvent, roleId: string, title: string) => {
+    (e: MouseEvent, roleId: string) => {
       e.preventDefault();
       e.stopPropagation();
       setApplicantRoleModalRoleId(roleId);
-      setApplicantRoleModalTitle(title);
       setApplicantRoleModalOpen(true);
     },
     [],
@@ -334,27 +336,9 @@ export default function BandBoard({
   const closeRoleApplicantsModal = useCallback(() => {
     setApplicantRoleModalOpen(false);
     setApplicantRoleModalRoleId(null);
-    setApplicantRoleModalTitle('');
   }, []);
 
-  const onRolePressStart = useCallback((roleId: string) => {
-    pressStartByRoleIdRef.current[roleId] = Date.now();
-  }, []);
-
-  const onRolePressEnd = useCallback(
-    (e: MouseEvent, roleId: string, title: string) => {
-      const startedAt = pressStartByRoleIdRef.current[roleId] ?? 0;
-      pressStartByRoleIdRef.current[roleId] = 0;
-      if (!startedAt) return;
-      const heldMs = Date.now() - startedAt;
-      if (heldMs >= 450) {
-        openRoleApplicantsModal(e, roleId, title);
-      }
-    },
-    [openRoleApplicantsModal],
-  );
-
-  const mainContent: ReactNode = loading ? (
+  const mainContent = loading ? (
     <div className="flex min-h-[40vh] items-center justify-center">
       <LoadingSpinner label="読み込み中…" compact />
     </div>
@@ -393,96 +377,45 @@ export default function BandBoard({
               const Icon = INSTRUMENT_ICONS[role.instrument_type];
               const roleApplicants = applicantsByRoleId[role.id] ?? [];
               const isMine = roleApplicants.some((a) => a.userId === authUserId);
-              const disabled = busyRoleId === role.id || p.owner_id === authUserId;
+              const isOwner = p.owner_id === authUserId;
+              const iconDisabled = busyRoleId === role.id || isOwner;
               return (
                 <div
                   key={role.id}
-                  role="button"
-                  tabIndex={disabled ? -1 : 0}
-                  aria-disabled={disabled}
-                  onClick={(e) => {
-                    if (disabled) return;
-                    void handleBandRoleClick(p.id, p.owner_id, role, e);
-                  }}
-                  onKeyDown={(e) => {
-                    if (disabled) return;
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      void handleBandRoleClick(p.id, p.owner_id, role, e as unknown as MouseEvent<HTMLElement>);
-                    }
-                  }}
-                  onMouseDown={() => onRolePressStart(role.id)}
-                  onMouseUp={(e) =>
-                    onRolePressEnd(
-                      e,
-                      role.id,
-                      `${INSTRUMENT_LABEL[role.instrument_type]} 応募者`,
-                    )
-                  }
-                  onTouchStart={() => onRolePressStart(role.id)}
-                  onTouchEnd={(e) =>
-                    onRolePressEnd(
-                      e as unknown as MouseEvent,
-                      role.id,
-                      `${INSTRUMENT_LABEL[role.instrument_type]} 応募者`,
-                    )
-                  }
-                  className={`group relative flex min-w-[4.5rem] flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 transition-all ${
-                    p.owner_id === authUserId
-                      ? 'cursor-default border-zinc-700/60 border-dashed bg-zinc-950/60 opacity-80'
-                      : isMine
-                        ? 'cursor-pointer border-emerald-500/35 bg-zinc-900/70'
-                        : 'cursor-pointer border-amber-500/35 bg-amber-500/[0.07] hover:border-amber-400/55 hover:bg-amber-500/12 active:scale-[0.98]'
-                  } ${disabled ? 'opacity-60' : ''}`}
-                  title={INSTRUMENT_LABEL[role.instrument_type]}
+                  className={`overflow-hidden rounded-xl border ${
+                    isMine
+                      ? 'border-emerald-500/40 bg-zinc-900/80'
+                      : 'border-zinc-700/80 bg-zinc-950/70'
+                  }`}
                 >
-                  <button
-                    type="button"
-                    onClick={(e) =>
-                      openRoleApplicantsModal(
-                        e,
-                        role.id,
-                        `${INSTRUMENT_LABEL[role.instrument_type]} 応募者`,
-                      )
-                    }
-                    className="relative flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-xl bg-zinc-950/80 ring-1 ring-inset ring-zinc-700/50"
-                    aria-label="応募者一覧を表示"
-                  >
-                    <Icon
-                      className={`h-6 w-6 ${
-                        p.owner_id === authUserId
-                          ? 'text-zinc-500'
-                          : isMine
-                            ? 'text-emerald-400/95'
-                            : 'text-amber-400/90 group-hover:text-amber-300'
-                      }`}
-                    />
-                  </button>
-                  <div className="flex -space-x-2">
-                    {roleApplicants.slice(0, 3).map((a) => (
-                      <button
-                        key={a.userId}
-                        type="button"
-                        onClick={(e) => openApplicantProfile(e, a.userId)}
-                        className="relative z-10 rounded-full ring-2 ring-zinc-950"
-                        aria-label={`${a.name}のプロフィール`}
-                      >
-                        <img
-                          src={
-                            a.avatarUrl?.trim()
-                              ? a.avatarUrl
-                              : 'https://placehold.co/32x32/27272a/a1a1aa?text=?'
-                          }
-                          alt=""
-                          className="h-5 w-5 rounded-full object-cover"
-                        />
-                      </button>
-                    ))}
+                  <div className="flex items-stretch">
+                    <button
+                      type="button"
+                      disabled={iconDisabled}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void handleBandRoleClick(p.id, p.owner_id, role, e);
+                      }}
+                      className={`flex h-11 w-11 items-center justify-center border-r border-zinc-700/80 ${
+                        isMine
+                          ? 'bg-emerald-500/10 text-emerald-300 shadow-[0_0_0.6rem_rgba(16,185,129,0.3)]'
+                          : 'bg-zinc-950/80 text-amber-300 hover:bg-zinc-900'
+                      } disabled:opacity-50`}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => openRoleApplicantsModal(e, role.id)}
+                      aria-expanded={
+                        applicantRoleModalOpen && applicantRoleModalRoleId === role.id
+                      }
+                      className="min-w-[7.5rem] bg-zinc-900/50 px-3 text-left text-xs font-semibold text-zinc-300 transition-colors hover:bg-zinc-800/70 hover:text-zinc-100"
+                    >
+                      {INSTRUMENT_LABEL[role.instrument_type]} ({roleApplicants.length})
+                    </button>
                   </div>
-                  <span className="text-[10px] font-medium text-zinc-500">
-                    {p.owner_id === authUserId ? '募集中' : isMine ? '応募済み' : '応募'}
-                    {roleApplicants.length > 0 ? ` · ${roleApplicants.length}` : ''}
-                  </span>
                 </div>
               );
             })}
@@ -603,13 +536,13 @@ export default function BandBoard({
             <div
               role="dialog"
               aria-modal
-              aria-label={applicantRoleModalTitle || '応募者'}
+              aria-label="応募者"
               className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
                 <div className="min-w-0 truncate text-sm font-semibold text-zinc-100">
-                  {applicantRoleModalTitle || '応募者'}
+                  応募者
                 </div>
                 <button
                   type="button"
@@ -620,39 +553,17 @@ export default function BandBoard({
                 </button>
               </div>
               <div className="max-h-[70dvh] overflow-y-auto p-3">
-                {(applicantsByRoleId[applicantRoleModalRoleId] ?? []).length === 0 ? (
-                  <div className="px-2 py-6 text-center text-sm text-zinc-500">
-                    No applicants yet
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {(applicantsByRoleId[applicantRoleModalRoleId] ?? []).map(
-                      (a) => (
-                        <button
-                          key={a.userId}
-                          type="button"
-                          onClick={(e) => openApplicantProfile(e, a.userId)}
-                          className="flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-left hover:bg-zinc-800/60"
-                        >
-                          <img
-                            src={
-                              a.avatarUrl?.trim()
-                                ? a.avatarUrl
-                                : 'https://placehold.co/48x48/27272a/a1a1aa?text=?'
-                            }
-                            alt=""
-                            className="h-9 w-9 rounded-full object-cover"
-                          />
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-zinc-100">
-                              {a.name}
-                            </div>
-                          </div>
-                        </button>
-                      ),
-                    )}
-                  </div>
-                )}
+                <ApplicantList
+                  roleId={applicantRoleModalRoleId}
+                  isOpen={applicantRoleModalOpen}
+                  mode={
+                    projects.find((p) =>
+                      p.roles.some((r) => r.id === applicantRoleModalRoleId),
+                    )?.owner_id === authUserId
+                      ? 'manage'
+                      : 'view'
+                  }
+                />
               </div>
             </div>
           </div>
