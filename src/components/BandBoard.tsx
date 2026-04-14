@@ -556,6 +556,8 @@ export default function BandBoard({
                 <ApplicantList
                   roleId={applicantRoleModalRoleId}
                   isOpen={applicantRoleModalOpen}
+                  onViewProfile={onViewProfile}
+                  onClose={closeRoleApplicantsModal}
                   mode={
                     projects.find((p) =>
                       p.roles.some((r) => r.id === applicantRoleModalRoleId),

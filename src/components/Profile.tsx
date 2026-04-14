@@ -703,6 +703,12 @@ export default function Profile({
             ownerUserId={user.id}
             isOwnProfile={isOwnProfile}
             authUserId={authUserId}
+            onViewProfile={(profileSlug) => {
+              const slug = profileSlug.trim();
+              if (!slug || typeof window === 'undefined') return;
+              window.history.pushState(null, '', `/user/${encodeURIComponent(slug)}`);
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }}
           />
 
           <div>

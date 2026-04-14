@@ -60,12 +60,14 @@ type Props = {
   ownerUserId: string;
   isOwnProfile: boolean;
   authUserId: string | null;
+  onViewProfile?: (profileSlug: string) => void;
 };
 
 export default function ProfileBandRecruitment({
   ownerUserId,
   isOwnProfile,
   authUserId,
+  onViewProfile,
 }: Props) {
   const [projects, setProjects] = useState<BandProjectWithRoles[]>([]);
   const [applicantsByRoleId, setApplicantsByRoleId] = useState<
@@ -421,6 +423,8 @@ export default function ProfileBandRecruitment({
                           roleId={role.id}
                           isOpen={listOpen}
                           mode={isOwner ? 'manage' : 'view'}
+                          onViewProfile={onViewProfile}
+                          onClose={() => setOpenApplicantListRoleId(null)}
                         />
                       ) : null}
                     </div>
