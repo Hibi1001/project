@@ -123,7 +123,7 @@ export default function InitialProfileSetup({ userId, onComplete }: Props) {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-              placeholder="例: 山田ギター"
+              placeholder="例: 下田響"
               maxLength={80}
               autoComplete="name"
               autoFocus
