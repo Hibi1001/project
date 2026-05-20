@@ -32,7 +32,6 @@ import {
 } from '../lib/timelineFeed';
 import LoadingSpinner from './LoadingSpinner';
 import { supabase } from '../lib/supabase';
-import { seedTimelineTestData } from '../lib/seedTestData';
 import LockScreen from './LockScreen';
 import Navbar from './Navbar';
 import PostReplySheet from './PostReplySheet';
@@ -161,8 +160,6 @@ export default function Timeline({
   const [dailyPosts, setDailyPosts] = useState<DailyPostRow[]>([]);
   const [viewTimelineWithoutPostToday, setViewTimelineWithoutPostToday] =
     useState(false);
-  const [seedRefreshNonce, setSeedRefreshNonce] = useState(0);
-  const [isSeeding, setIsSeeding] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewProgress, setPreviewProgress] = useState(0);
@@ -292,7 +289,6 @@ export default function Timeline({
     feedItems.length,
     primeTimelinePlayback,
     timelineRefreshTrigger,
-    seedRefreshNonce,
   ]);
 
   useEffect(() => {
@@ -580,7 +576,7 @@ export default function Timeline({
       }
     };
 
-    const isRefresh = timelineRefreshTrigger > 0 || seedRefreshNonce > 0;
+    const isRefresh = timelineRefreshTrigger > 0;
 
     if (feedBootstrap !== undefined) {
       if (feedBootstrap.loading) {
@@ -605,11 +601,7 @@ export default function Timeline({
     }
 
     void loadPostsFromNetwork();
-  }, [
-    timelineRefreshTrigger,
-    seedRefreshNonce,
-    feedBootstrap,
-  ]);
+  }, [timelineRefreshTrigger, feedBootstrap]);
 
   useEffect(() => {
     usersByIdRef.current = usersById;
@@ -978,54 +970,19 @@ export default function Timeline({
     });
   }, [previewProgress, activePostId, isPlaying, feedItems]);
 
-  const handleSeedTestData = async () => {
-    setIsSeeding(true);
-    try {
-      const result = await seedTimelineTestData();
-      if (!result.ok) {
-        console.error('Seed test data failed:', result.error);
-        window.alert(
-          `Seed failed (check RLS / FK policies): ${result.error ?? 'unknown error'}`,
-        );
-        return;
-      }
-      if (import.meta.env.DEV) {
-        setViewTimelineWithoutPostToday(true);
-      }
-      setSeedRefreshNonce((n) => n + 1);
-    } finally {
-      setIsSeeding(false);
-    }
-  };
-
-  const devSeedButton =
-    import.meta.env.DEV ? (
-      <button
-        type="button"
-        onClick={handleSeedTestData}
-        disabled={isSeeding}
-        className="fixed left-3 top-3 z-[100] rounded-lg border border-amber-500/50 bg-amber-950/90 px-3 py-1.5 text-xs font-semibold text-amber-200 shadow-lg backdrop-blur-sm hover:bg-amber-900/90 disabled:opacity-60"
-      >
-        {isSeeding ? 'Seeding…' : 'Seed Test Data'}
-      </button>
-    ) : null;
-
   // Reaction state is handled locally per-post (no global refresh on focus).
 
   if (feedBootstrap?.loading || isAuthLoading) {
     return (
-      <>
-        {devSeedButton}
-        <div className="fixed inset-0 z-[120] bg-zinc-950">
-          <LoadingSpinner
-            label={
-              feedBootstrap?.loading
-                ? '読み込み中…'
-                : 'タイムラインを準備しています…'
-            }
-          />
-        </div>
-      </>
+      <div className="fixed inset-0 z-[120] bg-zinc-950">
+        <LoadingSpinner
+          label={
+            feedBootstrap?.loading
+              ? '読み込み中…'
+              : 'タイムラインを準備しています…'
+          }
+        />
+      </div>
     );
   }
 
@@ -1036,7 +993,6 @@ export default function Timeline({
   if (showLockGate) {
     return (
       <>
-        {devSeedButton}
         <LockScreen
           onUnlock={onShareSong}
           onViewTimelineOnly={() => setViewTimelineWithoutPostToday(true)}
@@ -1049,19 +1005,15 @@ export default function Timeline({
 
   if (isLoading) {
     return (
-      <>
-        {devSeedButton}
-        <div className="fixed inset-0 z-[120] bg-zinc-950">
-          <LoadingSpinner label="読み込み中…" />
-        </div>
-      </>
+      <div className="fixed inset-0 z-[120] bg-zinc-950">
+        <LoadingSpinner label="読み込み中…" />
+      </div>
     );
   }
 
   if (!posts.length) {
     return (
       <>
-        {devSeedButton}
         {timelineNavbar}
         <div className="fixed inset-0 flex flex-col items-center justify-center bg-zinc-950 px-6 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] pt-[env(safe-area-inset-top,0px)]">
           <div className="max-w-xs text-center text-sm text-zinc-400">
@@ -1216,7 +1168,6 @@ export default function Timeline({
 
   return (
     <>
-      {devSeedButton}
       {timelineNavbar}
       <PostReplySheet
         postId={replySheetPostId}
