@@ -29,6 +29,10 @@ export interface Post {
   /** Number of rows in `post_replies` for this post. */
   replyCount: number;
   previewUrl?: string;
+  /** User-uploaded performance audio URL. */
+  mediaUrl?: string | null;
+  /** e.g. `audio` */
+  mediaType?: string | null;
   /** Store track id (iTunes `trackId` string or legacy Spotify id); column `spotify_track_id`. */
   spotifyTrackId?: string | null;
   reactions: {
@@ -70,6 +74,8 @@ export interface DbPost {
   created_at: string;
   /** iTunes track id (stringified) or legacy Spotify id; column name retained. */
   spotify_track_id?: string | null;
+  media_url?: string | null;
+  media_type?: string | null;
 }
 
 export interface DbPostReply {

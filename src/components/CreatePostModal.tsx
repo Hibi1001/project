@@ -1,9 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ChangeEvent,
+} from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Music2, Search } from 'lucide-react';
+import { X, Music2, Search, Upload, Loader2 } from 'lucide-react';
 import {
   createPost,
+  DEFAULT_PERFORMANCE_COVER_URL,
   searchItunesTracksForPosting,
+  uploadUserMedia,
   type ItunesShareTrack,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
@@ -15,6 +23,15 @@ const DEFAULT_TREND_ARTISTS = [
   'Vaundy',
   'ASIAN KUNG-FU GENERATION',
 ] as const;
+
+const MAX_PERFORMANCE_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+type ShareMode = 'itunes' | 'upload';
+
+function performanceTitleFromFile(file: File): string {
+  const base = file.name.replace(/\.[^.]+$/, '').trim();
+  return base || 'パフォーマンス';
+}
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -46,6 +63,10 @@ export default function CreatePostModal({
     null,
   );
   const [milestoneMessage, setMilestoneMessage] = useState<string | null>(null);
+  const [shareMode, setShareMode] = useState<ShareMode>('itunes');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runSearch = useCallback(async () => {
     if (!isOpen) return;
@@ -146,8 +167,20 @@ export default function CreatePostModal({
       setError(null);
       setCaption('');
       setSelectedTrack(null);
+      setShareMode('itunes');
+      setUploadFile(null);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!uploadFile) {
+      setUploadPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(uploadFile);
+    setUploadPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [uploadFile]);
 
   useEffect(() => {
     if (!milestoneMessage) return;
@@ -159,6 +192,63 @@ export default function CreatePostModal({
     if (isSubmitting) return;
     setError(null);
     setSelectedTrack(track);
+  };
+
+  const handlePerformanceFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    setError(null);
+    if (!file) {
+      setUploadFile(null);
+      return;
+    }
+    if (!file.type.startsWith('audio/')) {
+      setError('音声ファイル（audio/*）を選択してください');
+      setUploadFile(null);
+      return;
+    }
+    if (file.size > MAX_PERFORMANCE_UPLOAD_BYTES) {
+      setError('ファイルサイズは10MB以下にしてください（約60秒の目安）');
+      setUploadFile(null);
+      return;
+    }
+    setUploadFile(file);
+    setSelectedTrack(null);
+  };
+
+  const handleUploadSubmit = async () => {
+    if (!uploadFile || isSubmitting) return;
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const mediaUrl = await uploadUserMedia(uploadFile, userId);
+      const title = performanceTitleFromFile(uploadFile);
+
+      const { milestonePostCount } = await createPost({
+        userId,
+        trackName: title,
+        artistName: 'オリジナル',
+        previewUrl: null,
+        coverUrl: DEFAULT_PERFORMANCE_COVER_URL,
+        mediaUrl,
+        mediaType: 'audio',
+        caption: caption.trim() || null,
+      });
+
+      setUploadFile(null);
+      setCaption('');
+      if (milestonePostCount != null) {
+        setMilestoneMessage(
+          `🎉 楽曲シェア数が${milestonePostCount}回達成！この調子でみんなと「好き」を共有しよう！`,
+        );
+      }
+      onClose();
+      onSubmitSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '投稿に失敗しました');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -206,6 +296,8 @@ export default function CreatePostModal({
       setSearchQuery('');
       setCaption('');
       setSelectedTrack(null);
+      setShareMode('itunes');
+      setUploadFile(null);
       onClose();
     }
   };
@@ -275,6 +367,155 @@ export default function CreatePostModal({
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col p-4">
+                <div
+                  className="mb-3 flex shrink-0 rounded-xl border border-zinc-700/80 bg-zinc-800/50 p-1"
+                  role="tablist"
+                  aria-label="シェア方法"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={shareMode === 'itunes'}
+                    onClick={() => {
+                      setShareMode('itunes');
+                      setUploadFile(null);
+                      setError(null);
+                    }}
+                    disabled={isSubmitting}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                      shareMode === 'itunes'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    } disabled:opacity-50`}
+                  >
+                    iTunes検索
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={shareMode === 'upload'}
+                    onClick={() => {
+                      setShareMode('upload');
+                      setSelectedTrack(null);
+                      setError(null);
+                    }}
+                    disabled={isSubmitting}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                      shareMode === 'upload'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    } disabled:opacity-50`}
+                  >
+                    演奏をアップロード
+                  </button>
+                </div>
+
+                {error ? (
+                  <p className="mb-3 rounded-lg bg-red-400/10 px-3 py-2 text-sm text-red-400">
+                    {error}
+                  </p>
+                ) : null}
+
+                <div className="mb-3 shrink-0 rounded-xl border border-zinc-700/80 bg-zinc-800/40 px-3 py-2">
+                  <label
+                    htmlFor="post-caption"
+                    className="text-xs font-medium text-zinc-400"
+                  >
+                    ひとこと（任意・{POST_CAPTION_MAX_LENGTH}文字まで）
+                  </label>
+                  <textarea
+                    id="post-caption"
+                    value={caption}
+                    onChange={(e) =>
+                      setCaption(
+                        e.target.value.slice(0, POST_CAPTION_MAX_LENGTH),
+                      )
+                    }
+                    rows={2}
+                    placeholder="今日の気分をひとこと…"
+                    disabled={isSubmitting}
+                    className="mt-1.5 w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900/80 px-2.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
+                  />
+                  <p className="mt-1 text-right text-[10px] text-zinc-500">
+                    {caption.length}/{POST_CAPTION_MAX_LENGTH}
+                  </p>
+                </div>
+
+                {shareMode === 'upload' ? (
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={handlePerformanceFileChange}
+                      disabled={isSubmitting}
+                    />
+                    <p className="mb-2 text-xs text-zinc-500">
+                      音声のみ・最大10MB（約60秒の目安）
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isSubmitting}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-600 bg-zinc-800/40 px-4 py-4 text-sm font-medium text-zinc-200 transition-colors hover:border-emerald-500/40 hover:bg-zinc-800 disabled:opacity-50"
+                    >
+                      <Upload className="h-4 w-4 text-emerald-400" />
+                      {uploadFile ? '別のファイルを選ぶ' : '音声ファイルを選択'}
+                    </button>
+                    {uploadFile ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-3 rounded-xl border border-emerald-500/35 bg-zinc-900/70 px-3 py-3"
+                      >
+                        <p className="truncate text-sm font-medium text-zinc-100">
+                          {uploadFile.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          {(uploadFile.size / (1024 * 1024)).toFixed(2)} MB
+                        </p>
+                        {uploadPreviewUrl ? (
+                          <audio
+                            controls
+                            src={uploadPreviewUrl}
+                            className="mt-3 w-full rounded-lg"
+                            preload="metadata"
+                          />
+                        ) : null}
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setUploadFile(null)}
+                            disabled={isSubmitting}
+                            className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-60"
+                          >
+                            キャンセル
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleUploadSubmit()}
+                            disabled={isSubmitting}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-emerald-500/30 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isSubmitting ? (
+                              <>
+                                <Loader2
+                                  className="h-3.5 w-3.5 animate-spin"
+                                  aria-hidden
+                                />
+                                アップロード中…
+                              </>
+                            ) : (
+                              '投稿'
+                            )}
+                          </button>
+                        </div>
+                      </motion.div>
+                    ) : null}
+                  </div>
+                ) : (
+                <>
                 <div className="mb-3 shrink-0 space-y-2">
                   <label
                     htmlFor="track-search"
@@ -314,12 +555,6 @@ export default function CreatePostModal({
                     プレビューがない曲は、投稿後もタイムラインで再生されない場合があります。
                   </p>
                 </div>
-
-                {error ? (
-                  <p className="mt-2 rounded-lg bg-red-400/10 px-3 py-2 text-sm text-red-400">
-                    {error}
-                  </p>
-                ) : null}
 
                 <div className="mt-3 flex min-h-0 flex-1 flex-col">
                   {selectedTrack ? (
@@ -362,31 +597,6 @@ export default function CreatePostModal({
                       </div>
                     </div>
                   ) : null}
-
-                  <div className="mb-3 shrink-0 rounded-xl border border-zinc-700/80 bg-zinc-800/40 px-3 py-2">
-                    <label
-                      htmlFor="post-caption"
-                      className="text-xs font-medium text-zinc-400"
-                    >
-                      ひとこと（任意・{POST_CAPTION_MAX_LENGTH}文字まで）
-                    </label>
-                    <textarea
-                      id="post-caption"
-                      value={caption}
-                      onChange={(e) =>
-                        setCaption(
-                          e.target.value.slice(0, POST_CAPTION_MAX_LENGTH),
-                        )
-                      }
-                      rows={2}
-                      placeholder="今日の気分をひとこと…"
-                      disabled={isSubmitting}
-                      className="mt-1.5 w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900/80 px-2.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
-                    />
-                    <p className="mt-1 text-right text-[10px] text-zinc-500">
-                      {caption.length}/{POST_CAPTION_MAX_LENGTH}
-                    </p>
-                  </div>
 
                   {listLoading ? (
                     <p className="py-4 text-sm text-zinc-500">
@@ -445,6 +655,8 @@ export default function CreatePostModal({
                     </ul>
                   ) : null}
                 </div>
+                </>
+                )}
               </div>
             </div>
           </motion.div>

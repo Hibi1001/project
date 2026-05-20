@@ -1426,6 +1426,12 @@ export default function Timeline({
             .filter((i) => i.itemType === 'song').length;
           void songOrdinal;
 
+          const hasUserAudio = Boolean(
+            post.mediaUrl?.trim() &&
+              post.mediaType?.toLowerCase().includes('audio'),
+          );
+          const hasItunesPreview = Boolean(post.previewUrl?.trim());
+
           return (
             <motion.section
               key={post.id}
@@ -1485,7 +1491,7 @@ export default function Timeline({
                   </div>
                 ) : null}
                 <div className="relative mx-auto w-72 shrink-0 sm:w-80">
-                  {post.previewUrl ? (
+                  {hasItunesPreview ? (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -1599,6 +1605,25 @@ export default function Timeline({
                     initialIsLiked={false}
                     userId={authUserId}
                   />
+
+                  {hasUserAudio ? (
+                    <motion.div
+                      className="mx-auto mt-2 w-full max-w-md px-2"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      role="presentation"
+                    >
+                      <p className="mb-1 text-center text-[11px] font-medium text-emerald-400/90">
+                        演奏音源
+                      </p>
+                      <audio
+                        controls
+                        src={post.mediaUrl ?? undefined}
+                        className="w-full mt-3 rounded-lg"
+                        preload="metadata"
+                      />
+                    </motion.div>
+                  ) : null}
                 </div>
 
                 {postUser ? (
@@ -1632,7 +1657,7 @@ export default function Timeline({
                       className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
                       style={{
                         width:
-                          post.id === activePostId && post.previewUrl
+                          post.id === activePostId && hasItunesPreview
                             ? `${Math.min(100, Math.max(0, previewProgress) * 100)}%`
                             : post.id === ioPostId
                               ? '33%'
@@ -1650,9 +1675,13 @@ export default function Timeline({
                   </div>
                   <p className="mt-2 text-center text-xs text-zinc-500">
                     {songPosition} / {feedItems.length}
-                    {post.id === activePostId && post.previewUrl ? (
+                    {post.id === activePostId && hasItunesPreview ? (
                       <span className="ml-2 text-[10px] text-zinc-600">
                         プレビュー最大 {PREVIEW_UI_DURATION_SEC} 秒
+                      </span>
+                    ) : hasUserAudio ? (
+                      <span className="ml-2 text-[10px] text-zinc-600">
+                        演奏音源
                       </span>
                     ) : null}
                   </p>

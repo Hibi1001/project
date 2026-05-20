@@ -125,7 +125,17 @@ function aggregateReactions(
   }, { ...emptyReactions });
 }
 
-const DEFAULT_COVER_URL = 'https://placehold.co/300x300?text=No+Cover';
+export const DEFAULT_COVER_URL = 'https://placehold.co/300x300?text=No+Cover';
+export const DEFAULT_PERFORMANCE_COVER_URL =
+  'https://placehold.co/300x300?text=Performance';
+
+const USER_MEDIA_BUCKET = 'user_media';
+const MAX_USER_MEDIA_BYTES = 10 * 1024 * 1024;
+
+function sanitizeStorageFileName(name: string): string {
+  const base = name.trim() || 'recording';
+  return base.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
+}
 
 function mapDbPostToPost(
   post: DbPost,
@@ -141,6 +151,8 @@ function mapDbPostToPost(
     caption: post.caption ?? null,
     replyCount,
     previewUrl: post.preview_url,
+    mediaUrl: post.media_url?.trim() || null,
+    mediaType: post.media_type?.trim() || null,
     spotifyTrackId: post.spotify_track_id?.trim() || null,
     reactions: aggregateReactions(reactions),
   };
@@ -677,8 +689,44 @@ export interface CreatePostParams {
   coverUrl: string;
   /** Store track id (iTunes `trackId` or legacy Spotify id); persisted as `spotify_track_id`. */
   spotifyTrackId?: string | null;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
   /** ひとこと — max {@link POST_CAPTION_MAX_LENGTH} chars. */
   caption?: string | null;
+}
+
+export async function uploadUserMedia(file: File, userId: string): Promise<string> {
+  if (!userId.trim()) {
+    throw new Error('ユーザーIDが無効です');
+  }
+  if (!file.type.startsWith('audio/')) {
+    throw new Error('音声ファイルを選択してください');
+  }
+  if (file.size > MAX_USER_MEDIA_BYTES) {
+    throw new Error('ファイルサイズは10MB以下にしてください');
+  }
+
+  const safeName = sanitizeStorageFileName(file.name);
+  const objectPath = `${userId}/${Date.now()}-${safeName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(USER_MEDIA_BUCKET)
+    .upload(objectPath, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || 'audio/mpeg',
+    });
+
+  if (uploadError) {
+    console.error('Error uploading user media', uploadError);
+    throw new Error(uploadError.message);
+  }
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from(USER_MEDIA_BUCKET).getPublicUrl(objectPath);
+
+  return publicUrl;
 }
 
 /** Total post count thresholds for share celebrations (after a successful insert). */
@@ -700,6 +748,9 @@ export async function createPost(params: CreatePostParams): Promise<CreatePostRe
       ? rawCap.slice(0, POST_CAPTION_MAX_LENGTH)
       : null;
 
+  const mediaUrl = params.mediaUrl?.trim() || null;
+  const mediaType = params.mediaType?.trim() || null;
+
   const { data, error } = await supabase
     .from('posts')
     .insert({
@@ -710,6 +761,8 @@ export async function createPost(params: CreatePostParams): Promise<CreatePostRe
       cover_url: params.coverUrl,
       caption,
       spotify_track_id: params.spotifyTrackId?.trim() || null,
+      media_url: mediaUrl,
+      media_type: mediaType,
     })
     .select()
     .single();
